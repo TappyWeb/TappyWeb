@@ -28,13 +28,22 @@ vector<Token> lex(string s,int line) {
         if(isspace((unsigned char)s[i])){++i;continue;} if(s[i]=='#') break;
         Token t;
         if(s[i]=='"') { t.quoted=true; ++i; bool closed=false; while(i<s.size()) { char c=s[i++]; if(c=='"'){closed=true;break;} if(c=='\\'){if(i==s.size())fail(line,"Unfinished escape.");c=s[i++]; if(c=='n')c='\n';else if(c=='t')c='\t';else if(c!='"'&&c!='\\')fail(line,"Use \\n, \\t, \\\" or \\\\ inside text.");} t.text+=c;} if(!closed)fail(line,"Close this text with a double quote."); }
-        else { while(i<s.size()&&!isspace((unsigned char)s[i])&&s[i]!=':') t.text+=s[i++]; if(t.text.empty()&&s[i]==':'){t.text=":";++i;} }
+        else { while(i<s.size()&&!isspace((unsigned char)s[i])&&s[i]!=':'&&s[i]!='('&&s[i]!=')'&&s[i]!=','&&s[i]!='#') t.text+=s[i++]; if(t.text.empty()){t.text=string(1,s[i++]);} }
         ts.push_back(t);
     } return ts;
 }
 vector<Node> parse(const string& source) {
     struct Line{int indent;Node node;}; vector<Line> lines; istringstream in(source); string s; int n=0;
-    while(getline(in,s)){++n;size_t i=0;while(i<s.size()&&s[i]==' ')++i;if(i<s.size()&&s[i]=='\t')fail(n,"Use spaces instead of tabs for indentation.");auto t=lex(s.substr(i),n);if(t.empty())continue;if(i%4)fail(n,"Indent with four spaces per level.");if(!t.back().quoted&&t.back().text==":")t.pop_back();if(t.empty())fail(n,"Expected a command before ':'.");lines.push_back({int(i/4),{n,t,{}}});}
+    while(getline(in,s)) {
+        ++n;size_t i=0,columns=0;
+        while(i<s.size()&&(s[i]==' '||s[i]=='\t')){columns+=s[i]=='\t'?4-columns%4:1;++i;}
+        auto t=lex(s.substr(i),n);if(t.empty())continue;
+        if(columns%4)fail(n,"Indent with four spaces or one tab per level.");
+        if(!t.back().quoted&&t.back().text==":")t.pop_back();
+        if(t.empty())fail(n,"Expected a command before ':'.");
+        if(t[0].text=="navigation"&&(t.size()==1||(t.size()==2&&t[1].text=="bar")))t={{"nav",false}};
+        lines.push_back({int(columns/4),{n,t,{}}});
+    }
     size_t pos=0; function<vector<Node>(int)> block=[&](int depth){vector<Node> out;while(pos<lines.size()&&lines[pos].indent>=depth){if(lines[pos].indent!=depth)fail(lines[pos].node.line,"Indent only one level inside the previous command.");Node node=lines[pos++].node;if(pos<lines.size()&&lines[pos].indent>depth)node.children=block(depth+1);out.push_back(std::move(node));}return out;};
     return block(0);
 }
@@ -45,20 +54,26 @@ string str(const Value& v) {if(auto p=get_if<string>(&v))return *p;if(auto p=get
 bool truth(const Value& v){if(auto p=get_if<bool>(&v))return *p;if(auto p=get_if<double>(&v))return *p!=0;if(auto p=get_if<List>(&v))return !p->empty();return !get<string>(v).empty();}
 bool ident(const string& s){return !s.empty()&&(isalpha((unsigned char)s[0])||s[0]=='_')&&all_of(s.begin(),s.end(),[](unsigned char c){return isalnum(c)||c=='_';});}
 struct Engine {
-    vector<Node> roots; map<string,const Node*> pages,components; set<string> fragments; Env state; set<string> persistent; map<string,int> declarations; size_t revision=0;
+    vector<Node> roots; map<string,const Node*> pages,components; set<string> fragments; Env state; set<string> persistent; map<string,int> declarations; size_t revision=0; map<string,vector<string>> parameters;
     explicit Engine(vector<Node> r):roots(std::move(r)) {
         for(auto& n:roots){auto& t=n.t;string k=t[0].text;
             if(k=="page"||k=="fragment") {if(t.size()!=3||!t[1].quoted||t[2].quoted||t[2].text.empty()||t[2].text[0]!='/')fail(n.line,"Write page \"Name\" /route.");string route=t[2].text;if(!regex_match(route,regex(R"(/([A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*)?)")))fail(n.line,"Use / or a route like /my-page, without trailing slashes.");if(route.find_first_of("?#\\<>{}")!=string::npos||route.find("..")!=string::npos||route.rfind("/_tappy",0)==0||route.rfind("//",0)==0)fail(n.line,"Use a local URL path outside /_tappy.");if(!pages.emplace(route,&n).second)fail(n.line,"This page route is already used.");if(k=="fragment"){if(route=="/")fail(n.line,"Use a non-root route for a fragment.");fragments.insert(route);}}
-            else if(k=="component") {if(t.size()!=2||!ident(t[1].text)||!components.emplace(t[1].text,&n).second)fail(n.line,"Give each component a unique name.");}
-            else if(k=="remember"||k=="state") {if(t.size()<4||!ident(t[1].text)||t[2].text!="as"||!n.children.empty())fail(n.line,"Write remember tasks as [] or state count as 0.");string name=t[1].text;if(state.count(name))fail(n.line,"This variable is already declared.");state[name]=expr(t,3,t.size(),state,n.line);declarations[name]=n.line;if(k=="remember")persistent.insert(name);}
-            else fail(n.line,"At the top level use page, fragment, component, state or remember.");
-        } if(pages.size()==fragments.size())throw Error("Add at least one page, for example: page \"Home\" /");
+            else if(k=="component") {if(t.size()<2||!ident(t[1].text)||!components.emplace(t[1].text,&n).second)fail(n.line,"Give each component a unique name.");
+                vector<string> names;
+                if(t.size()>2){if(t.size()<4||t[2].text!="("||t.back().text!=")")fail(n.line,"Write component Metric(label, value):");
+                    for(size_t i=3;i+1<t.size();++i){if(!ident(t[i].text)||find(names.begin(),names.end(),t[i].text)!=names.end())fail(n.line,"Component parameters must have unique names.");names.push_back(t[i].text);if(i+2<t.size()){if(t[++i].text!=","||i+2==t.size())fail(n.line,"Separate component parameters with commas.");}}
+                }parameters[t[1].text]=names;}
+            else if(k=="remember"||k=="state"||k=="set"||k=="save") {if(t.size()<4||!ident(t[1].text)||(t[2].text!=(k=="set"?"to":"as"))||!n.children.empty())fail(n.line,"Write set count to 0 or save tasks as [].");string name=t[1].text;if(state.count(name))fail(n.line,"This variable is already declared.");state[name]=expr(t,3,t.size(),state,n.line);declarations[name]=n.line;if(k=="remember"||k=="save")persistent.insert(name);}
+            else fail(n.line,"At the top level use page, fragment, component, set or save.");
+        }
+        for(auto& [name,names]:parameters)for(auto& parameter:names)if(state.count(parameter))fail(components.at(name)->line,"Component parameters must not shadow global variables.");
+        if(pages.size()==fragments.size())throw Error("Add at least one page, for example: page \"Home\" /");
     }
     Value lookup(string name,const Env& e,int line) const {
         auto it=e.find(name);if(it!=e.end())return it->second;
         if(name.ends_with(".value"))return lookup(name.substr(0,name.size()-6),e,line);
         if(name.ends_with(".count")){auto v=lookup(name.substr(0,name.size()-6),e,line);if(auto p=get_if<List>(&v))return double(p->size());fail(line,".count works on a list.");}
-        fail(line,"I don't know '"+name+"'. Declare it with state/remember, or name an input with as.");
+        fail(line,"I don't know '"+name+"'. Declare it with set/save, or name an input with as.");
     }
     string interpolate(const string& s,const Env& e,int line) const {string out;size_t p=0;while(p<s.size()){auto a=s.find('{',p);if(a==string::npos){out+=s.substr(p);break;}out+=s.substr(p,a-p);auto b=s.find('}',a);if(b==string::npos)fail(line,"Close the {variable} in this text.");out+=str(lookup(s.substr(a+1,b-a-1),e,line));p=b+1;}return out;}
     Value atom(const Token& t,const Env& e,int line) const {
@@ -66,27 +81,71 @@ struct Engine {
         char* end=nullptr;double d=strtod(t.text.c_str(),&end);if(end!=t.text.c_str()&&*end=='\0'&&isfinite(d))return d;
         return lookup(t.text,e,line);
     }
-    Value expr(const vector<Token>& t,size_t a,size_t b,const Env& e,int line) const {
-        if(a>=b)fail(line,"Expected a value.");if(b-a==1)return atom(t[a],e,line);
-        // Left-to-right arithmetic deliberately has no hidden precedence.
-        if((b-a)%2==0)fail(line,"Use a value or arithmetic such as count + 1.");Value v=atom(t[a],e,line);
-        for(size_t i=a+1;i<b;i+=2){Value w=atom(t[i+1],e,line);string op=t[i].text;
-            if(op=="+"&&(holds_alternative<string>(v)||holds_alternative<string>(w)))v=str(v)+str(w);
-            else {auto x=get_if<double>(&v),y=get_if<double>(&w);if(!x||!y)fail(line,"Arithmetic needs numbers (or text + text).");double z=0;if(op=="+")z=*x+*y;else if(op=="-")z=*x-*y;else if(op=="*")z=*x * *y;else if(op=="/"){if(*y==0)fail(line,"Cannot divide by zero.");z=*x / *y;}else fail(line,"Use +, -, * or / between values.");if(!isfinite(z))fail(line,"This number is too large.");v=z;}
-        }return v;
+    Value expr(const vector<Token>& source,size_t a,size_t b,const Env& e,int line) const {
+        vector<Token> t;
+        for(size_t i=a;i<b;++i){if(source[i].quoted){t.push_back(source[i]);continue;}
+            string part;auto emit=[&]{if(!part.empty()){t.push_back({part,false});part.clear();}};
+            const string& raw=source[i].text;
+            for(size_t j=0;j<raw.size();++j){char c=raw[j];
+                // Keep scientific-notation signs attached to the number.
+                bool exponent=(c=='+'||c=='-')&&!part.empty()&&(part.back()=='e'||part.back()=='E')&&(isdigit((unsigned char)part[0])||part[0]=='.');
+                if(string("+-*/()").find(c)!=string::npos&&!exponent){emit();t.push_back({string(1,c),false});}else part+=c;
+            }emit();
+        }
+        size_t pos=0;int nesting=0;
+        function<Value(int)> expression;
+        function<Value()> primary=[&]() -> Value {
+            if(++nesting>128)fail(line,"Expression nesting is too deep.");
+            if(pos>=t.size())fail(line,"Expected a value.");
+            Token token=t[pos++];Value v;
+            if(!token.quoted&&(token.text=="+"||token.text=="-")){v=primary();auto number=get_if<double>(&v);if(!number)fail(line,"Unary + and - need a number.");if(token.text=="-")v=-*number;}
+            else if(!token.quoted&&token.text=="("){v=expression(0);if(pos>=t.size()||t[pos].quoted||t[pos++].text!=")")fail(line,"Close the expression with ')'.");}
+            else if(!token.quoted&&(token.text==")"||token.text=="*"||token.text=="/"))fail(line,"Expected a value.");
+            else v=atom(token,e,line);
+            --nesting;return v;
+        };
+        expression=[&](int minimum) -> Value {
+            Value left=primary();
+            while(pos<t.size()&&!t[pos].quoted){string op=t[pos].text;int precedence=(op=="+"||op=="-")?1:(op=="*"||op=="/")?2:-1;if(precedence<minimum)break;
+                ++pos;Value right=expression(precedence+1);
+                if(op=="+"&&(holds_alternative<string>(left)||holds_alternative<string>(right)))left=str(left)+str(right);
+                else {auto x=get_if<double>(&left),y=get_if<double>(&right);if(!x||!y)fail(line,"Arithmetic needs numbers (or text + text).");if(op=="/"&&*y==0)fail(line,"Cannot divide by zero.");double result=op=="+"?*x+*y:op=="-"?*x-*y:op=="*"?*x * *y:*x / *y;if(!isfinite(result))fail(line,"This number is too large.");left=result;}
+            }return left;
+        };
+        if(t.empty())fail(line,"Expected a value.");Value result=expression(0);if(pos!=t.size())fail(line,"Use +, -, * or / between values.");return result;
+    }
+    pair<string,Env> bind(const Node& n,const Env& e) const {
+        const auto& t=n.t;
+        if(t.size()<2||!components.count(t[1].text))fail(n.line,"Use a declared component name.");
+        string name=t[1].text;const auto& names=parameters.at(name);vector<Value> args;
+        if(t.size()>2){if(t.size()<4||t[2].text!="("||t.back().text!=")")fail(n.line,"Write use Metric(\"Label\", value).");
+            size_t start=3;int depth=0;
+            for(size_t i=3;i<t.size()-1;++i){if(!t[i].quoted&&t[i].text=="(")++depth;else if(!t[i].quoted&&t[i].text==")")--depth;
+                if(!t[i].quoted&&t[i].text==","&&depth==0){args.push_back(expr(t,start,i,e,n.line));start=i+1;}}
+            if(start<t.size()-1)args.push_back(expr(t,start,t.size()-1,e,n.line));else if(start!=3)fail(n.line,"Expected an argument after ','.");
+        }
+        if(args.size()!=names.size())fail(n.line,"Component '"+name+"' expects "+to_string(names.size())+" arguments.");
+        Env bound;for(size_t i=0;i<names.size();++i)bound[names[i]]=args[i];return {name,bound};
     }
     bool condition(const Node& n,const Env& e) const {
-        auto& t=n.t;if(t.size()==2)return truth(atom(t[1],e,n.line));
-        if(t.size()==4&&(t[2].text=="is"||t[2].text=="=="||t[2].text=="!="||t[2].text==">"||t[2].text=="<"||t[2].text==">="||t[2].text=="<=")){Value a=atom(t[1],e,n.line),b=atom(t[3],e,n.line);string op=t[2].text;if(op=="is"||op=="==")return a==b;if(op=="!=")return a!=b;auto x=get_if<double>(&a),y=get_if<double>(&b);if(!x||!y)fail(n.line,"Compare numbers with <, >, <= or >=.");if(op==">")return *x>*y;if(op=="<")return *x<*y;if(op==">=")return *x>=*y;return *x<=*y;}
-        fail(n.line,"Write if tasks.count is 0, or if ready.");
+        const auto& t=n.t;int depth=0;
+        for(size_t i=1;i<t.size();++i){if(t[i].quoted)continue;if(t[i].text=="(")++depth;else if(t[i].text==")")--depth;
+            string op=t[i].text;
+            if(depth!=0||(op!="is"&&op!="=="&&op!="!="&&op!=">"&&op!="<"&&op!=">="&&op!="<="))continue;
+            Value a=expr(t,1,i,e,n.line),b=expr(t,i+1,t.size(),e,n.line);
+            if(op=="is"||op=="==")return a==b;if(op=="!=")return a!=b;
+            auto x=get_if<double>(&a),y=get_if<double>(&b);if(!x||!y)fail(n.line,"Compare numbers with <, >, <= or >=.");
+            if(op==">")return *x>*y;if(op=="<")return *x<*y;if(op==">=")return *x>=*y;return *x<=*y;
+        }return truth(expr(t,1,t.size(),e,n.line));
     }
+
 };
 string token(){static random_device rd;ostringstream s;for(int i=0;i<4;++i)s<<hex<<setw(8)<<setfill('0')<<rd();return s.str();}
 struct InputRule {string name,type="text";bool required=false;};
 void gatherInputs(const Engine& app,const vector<Node>& nodes,map<string,InputRule>& result,set<string> seen={}) {
     for(auto& n:nodes){auto& t=n.t;string k=t[0].text;
         if((k=="input"||k=="textarea")&&t.size()>=4){InputRule r;r.name=t[3].text;for(size_t i=4;i<t.size();++i){if(t[i].text=="required")r.required=true;else if(t[i].text=="type"&&i+1<t.size())r.type=t[++i].text;}if(app.state.count(r.name)||result.count(r.name))fail(n.line,"Input names must be unique on a page and different from state names.");result[r.name]=r;}
-        if(k=="use"&&t.size()==2&&app.components.count(t[1].text)){if(!seen.insert(t[1].text).second)fail(n.line,"Components cannot include themselves.");gatherInputs(app,app.components.at(t[1].text)->children,result,seen);}
+        if(k=="use"&&t.size()>=2&&app.components.count(t[1].text)){if(!seen.insert(t[1].text).second)fail(n.line,"Components cannot include themselves.");gatherInputs(app,app.components.at(t[1].text)->children,result,seen);seen.erase(t[1].text);}
         gatherInputs(app,n.children,result,seen);
     }
 }
@@ -134,7 +193,7 @@ struct Renderer {
             previousIf=false;if(styles.count(k)||k=="on")continue;
             if(k=="if"){matched=app.condition(n,e);previousIf=true;if(matched)out+=render(n.children,e,locals);continue;}
             if(k=="for"){if(t.size()!=5||t[1].text!="each"||!ident(t[2].text)||t[3].text!="in")fail(n.line,"Write for each task in tasks:");Value v=app.lookup(t[4].text,e,n.line);auto list=get_if<List>(&v);if(!list)fail(n.line,"Loop over a list declared as [].");for(size_t i=0;i<list->size();++i){Env next=e,l=locals;next[t[2].text]=l[t[2].text]=(*list)[i];next[t[2].text+".index"]=l[t[2].text+".index"]=double(i);out+=render(n.children,next,l);}continue;}
-            if(k=="use"){if(t.size()!=2||!app.components.count(t[1].text))fail(n.line,"Use a declared component name.");string name=t[1].text;if(!expanding.insert(name).second)fail(n.line,"Components cannot include themselves.");out+=render(app.components.at(name)->children,e,locals);expanding.erase(name);continue;}
+            if(k=="use"){auto [name,bound]=app.bind(n,e);Env scoped=e,captured=locals;for(auto& [key,value]:bound)scoped[key]=captured[key]=value;if(!expanding.insert(name).second)fail(n.line,"Components cannot include themselves.");out+=render(app.components.at(name)->children,scoped,captured);expanding.erase(name);continue;}
             auto savedInputs=activeInputs;string tag,body,attrs;bool leaf=false;
             if(containers.count(k)){if(t.size()!=1)fail(n.line,k+" takes no arguments.");tag=k=="nav"||k=="section"||k=="footer"?k:"div";attrs=" class=\""+k+"\"";}
             else if(k=="heading"||k=="subheading"||k=="text"){tag=k=="heading"?"h1":k=="subheading"?"h2":"p";body=esc(text(n,1,t.size(),e));}
@@ -159,7 +218,7 @@ struct Renderer {
     }
 };
 struct Executor {
-    Engine& app;Env locals;string redirect;bool stopped=false;size_t budget=10000;
+    Engine& app;Env locals;set<string> inputNames;string redirect;bool stopped=false;size_t budget=10000;
     Executor(Engine& a,Env l):app(a),locals(std::move(l)){}
     Env env()const{Env e=app.state;for(auto& [k,v]:locals)e[k]=v;return e;}
     void run(const vector<Node>& nodes,bool validate=false) {
@@ -172,7 +231,7 @@ struct Executor {
             if(k=="set"){if(t.size()<4||t[2].text!="to"||!app.state.count(t[1].text))fail(n.line,"Write set declaredVariable to value.");Value value=app.expr(t,3,t.size(),e,n.line);if(value.index()!=app.state.at(t[1].text).index())fail(n.line,"Keep the same type when setting a variable.");if(!validate)app.state[t[1].text]=value;}
             else if(k=="add"){if(t.size()<4||t[t.size()-2].text!="to")fail(n.line,"Write add value to list.");string name=t.back().text;if(!app.state.count(name)||!holds_alternative<List>(app.state.at(name)))fail(n.line,"Add items to a declared list.");Value v=app.expr(t,1,t.size()-2,e,n.line);if(!holds_alternative<string>(v))fail(n.line,"MVP lists contain text items.");if(!validate){auto& list=get<List>(app.state[name]);if(list.size()>=10000)fail(n.line,"A list can contain at most 10,000 items.");list.push_back(get<string>(v));}}
             else if(k=="remove"){if(t.size()!=4||t[2].text!="from"||!app.state.count(t[3].text)||!holds_alternative<List>(app.state.at(t[3].text)))fail(n.line,"Write remove task from tasks (inside a loop), or remove index from list.");Value v=app.atom(t[1],e,n.line);double index=-1;if(holds_alternative<double>(v))index=get<double>(v);else if(e.count(t[1].text+".index"))index=get<double>(e.at(t[1].text+".index"));else fail(n.line,"Remove using a loop item or a numeric index.");if(!validate){auto& list=get<List>(app.state[t[3].text]);if(index<0||floor(index)!=index||index>=double(list.size()))fail(n.line,"That list item no longer exists. Refresh and try again.");list.erase(list.begin()+size_t(index));}}
-            else if(k=="clear"){if(t.size()!=2)fail(n.line,"Write clear list.");if(app.state.count(t[1].text)&&holds_alternative<List>(app.state[t[1].text])){if(!validate)get<List>(app.state[t[1].text]).clear();}else fail(n.line,"clear expects a declared list; forms clear automatically after submission.");}
+            else if(k=="clear"){if(t.size()!=2)fail(n.line,"Write clear list.");if(app.state.count(t[1].text)&&holds_alternative<List>(app.state[t[1].text])){if(!validate)get<List>(app.state[t[1].text]).clear();}else if(inputNames.count(t[1].text)){if(!validate)locals[t[1].text]=string{};}else fail(n.line,"clear expects a declared list or a named form input.");}
             else if(k=="open"){if(t.size()!=2)fail(n.line,"Write open \"/route\".");string url=str(app.atom(t[1],e,n.line));if(!app.pages.count(url))fail(n.line,"open needs a declared page route.");if(!validate){redirect=url;stopped=true;}}
             else if(k=="stop"){if(t.size()!=1)fail(n.line,"stop takes no arguments.");if(!validate)stopped=true;}
             else fail(n.line,"Unknown action '"+k+"'. Use set, add, remove, clear, open, if or stop.");
@@ -182,7 +241,7 @@ struct Executor {
 void validate(Engine& app) {
     Session session;
     auto validationPages=app.pages;vector<Node> synthetic;synthetic.reserve(app.components.size());
-    for(auto& [name,component]:app.components){Node n;n.line=component->line;n.t={{"page",false},{name,true},{"/__check_"+name,false}};n.children=component->children;synthetic.push_back(std::move(n));}
+    for(auto& [name,component]:app.components){if(!app.parameters.at(name).empty())continue;Node n;n.line=component->line;n.t={{"page",false},{name,true},{"/__check_"+name,false}};n.children=component->children;synthetic.push_back(std::move(n));}
     for(auto& n:synthetic)validationPages[n.t[2].text]=&n;
     for(auto& [route,page]:validationPages){bool temporary=!app.pages.count(route);if(temporary)app.pages[route]=page;map<string,InputRule> inputs;gatherInputs(app,page->children,inputs);Env base=app.state;for(auto& [name,r]:inputs)base[name]=string{};set<string> used;
         function<void(const vector<Node>&,Env,string)> walk=[&](const vector<Node>& nodes,Env e,string parent){bool prev=false;for(auto& n:nodes){string k=n.t[0].text;
@@ -191,11 +250,11 @@ void validate(Engine& app) {
             if((parent=="heading"||parent=="subheading"||parent=="text"||parent=="link"||parent=="image")&&!styles.count(k))fail(n.line,"Only style or HTMX attributes belong inside this element.");
             if(parent=="button"&&k!="on"&&!styles.count(k))fail(n.line,"Inside a button use styles, HTMX attributes or on click.");
             if(k=="form"&&parent=="form")fail(n.line,"Forms cannot be nested.");
-            if(k=="on"){if(app.fragments.count(route))fail(n.line,"Fragments are read-only views. Put actions on a page.");if(parent!="button"&&parent!="form")fail(n.line,"Put on click inside a button, or on submit inside a form.");if(n.t.size()!=2||n.t[1].text!=(parent=="button"?"click":"submit"))fail(n.line,"This event doesn't match its element.");Env locals=e;for(auto& [key,v]:app.state)locals.erase(key);Executor exec{app,locals};exec.run(n.children,true);continue;}
+            if(k=="on"){if(app.fragments.count(route))fail(n.line,"Fragments are read-only views. Put actions on a page.");if(parent!="button"&&parent!="form")fail(n.line,"Put on click inside a button, or on submit inside a form.");if(n.t.size()!=2||n.t[1].text!=(parent=="button"?"click":"submit"))fail(n.line,"This event doesn't match its element.");Env locals=e;for(auto& [key,v]:app.state)locals.erase(key);Executor exec{app,locals};for(auto& [name,rule]:inputs){(void)rule;exec.inputNames.insert(name);}exec.run(n.children,true);continue;}
             if(styles.count(k)){if(parent=="page"||containers.count(parent)||parent=="heading"||parent=="subheading"||parent=="text"||parent=="button"||parent=="link"||parent=="form"||parent=="image"){}else fail(n.line,"Put style commands inside an element.");if(!n.children.empty())fail(n.line,"Style commands cannot contain a block.");}
             if(k=="if")app.condition(n,e);
             if(k=="for"){auto& t=n.t;if(t.size()!=5||t[1].text!="each"||!ident(t[2].text)||t[3].text!="in")fail(n.line,"Write for each task in tasks:");auto v=app.lookup(t[4].text,e,n.line);if(!holds_alternative<List>(v))fail(n.line,"Loop over a list.");child[t[2].text]=string("Example");child[t[2].text+".index"]=0.0;}
-            if(k=="use"){if(n.t.size()!=2||!app.components.count(n.t[1].text))fail(n.line,"Use a declared component.");if(!n.children.empty())fail(n.line,"use takes no nested commands.");if(!used.insert(n.t[1].text).second)fail(n.line,"Components cannot include themselves.");walk(app.components.at(n.t[1].text)->children,e,parent);used.erase(n.t[1].text);}
+            if(k=="use"){auto [componentName,bound]=app.bind(n,e);Env scoped=e;for(auto& [name,value]:bound)scoped[name]=value;if(!n.children.empty())fail(n.line,"use takes no nested commands.");if(!used.insert(n.t[1].text).second)fail(n.line,"Components cannot include themselves.");walk(app.components.at(componentName)->children,scoped,parent);used.erase(n.t[1].text);}
             // Render each node with dummy loop locals, so empty lists and false branches still get checked.
             if(k!="for"&&k!="if"&&k!="else"&&k!="use"&&k!="on"&&!styles.count(k)){Node copy=n;copy.children.erase(remove_if(copy.children.begin(),copy.children.end(),[](const Node& c){return c.t[0].text!="on"&&!styles.count(c.t[0].text);}),copy.children.end());Renderer r{app,session,route};r.render({copy},e);}
             walk(n.children,child,k);
@@ -258,7 +317,7 @@ void serve(Engine& app,const fs::path& source,int port){
         Env backup=app.state;size_t oldRevision=app.revision;
         try{auto inputs=action.inputs;Env locals=action.locals;
             for(auto& [name,rule]:inputs){string value=req.has_param(name)?req.get_param_value(name):"";if(value.size()>4096)throw Error("Input is too long (maximum 4096 bytes).");if(rule.required&&trim(value).empty())throw Error("Please fill in '"+name+"'.");if(rule.type=="email"&&!value.empty()&&(value.find('@')==string::npos||value.find('@')==0||value.back()=='@'))throw Error("Enter an email address for '"+name+"'.");locals[name]=value;}
-            Executor exec{app,locals};exec.run(action.event->children);string route=exec.redirect.empty()?action.route:exec.redirect;
+            Executor exec{app,locals};for(auto& [name,rule]:inputs){(void)rule;exec.inputNames.insert(name);}exec.run(action.event->children);string route=exec.redirect.empty()?action.route:exec.redirect;
             // Render before persisting so a rendering error rolls back the entire mutation.
             ++app.revision;Renderer renderer{app,session,route};string body=renderer.page();save(app,dataPath(source));session.actions.erase(req.matches[1].str());if(!exec.redirect.empty())res.set_header("HX-Push-Url",route);res.set_content(body,"text/html; charset=utf-8");
         }catch(const exception& e){app.state=backup;app.revision=oldRevision;Renderer renderer{app,session,action.route};res.set_content(renderer.page(e.what()),"text/html; charset=utf-8");}
@@ -268,7 +327,7 @@ void serve(Engine& app,const fs::path& source,int port){
     if(!server.listen("127.0.0.1",port))throw Error("Cannot listen on port "+to_string(port)+". Try --port with a different number.");
 }
 int main(int argc,char** argv){try{
-    if(argc<2||string(argv[1])=="--help"){cout<<"Tappyweb 0.1 — a small, readable web language\n\n  tappy file.tappy [--port 3000]\n  tappy check file.tappy\n  tappy serve file.tappy [--port 3000]\n  tappy build file.tappy [--out dist]\n\nbuild exports static pages; use serve for forms and state changes.\n";return 0;}string command=argv[1];if(command=="--version"){cout<<"tappy 0.1.1\n";return 0;}bool direct=fs::path(command).extension()==".tappy";int sourceIndex=direct?1:2;if(direct)command="serve";if(command!="check"&&command!="serve"&&command!="build")throw Error("Unknown command. Use tappy file.tappy or run tappy --help.");if(argc<=sourceIndex)throw Error("Give a .tappy source file.");fs::path source=fs::absolute(argv[sourceIndex]);filename=source.string();int port=3000;fs::path out="dist";
+    if(argc<2||string(argv[1])=="--help"){cout<<"Tappyweb 0.2 — a small, readable web language\n\n  tappy file.tappy [--port 3000]\n  tappy check file.tappy\n  tappy serve file.tappy [--port 3000]\n  tappy build file.tappy [--out dist]\n\nbuild exports static pages; use serve for forms and state changes.\n";return 0;}string command=argv[1];if(command=="--version"){cout<<"tappy 0.2.0\n";return 0;}bool direct=fs::path(command).extension()==".tappy";int sourceIndex=direct?1:2;if(direct)command="serve";if(command!="check"&&command!="serve"&&command!="build")throw Error("Unknown command. Use tappy file.tappy or run tappy --help.");if(argc<=sourceIndex)throw Error("Give a .tappy source file.");fs::path source=fs::absolute(argv[sourceIndex]);filename=source.string();int port=3000;fs::path out="dist";
     for(int i=sourceIndex+1;i<argc;++i){string opt=argv[i];if(i+1>=argc)throw Error("Missing value after "+opt);string value=argv[++i];if(opt=="--port"&&command=="serve"){if(value.empty()||!all_of(value.begin(),value.end(),[](unsigned char c){return isdigit(c);})||value.size()>5)throw Error("Port must be 1–65535.");port=stoi(value);if(port<1||port>65535)throw Error("Port must be 1–65535.");}else if(opt=="--out"&&command=="build")out=value;else throw Error("Unknown option: "+opt);}
     Engine app(parse(readFile(source)));validate(app);
     if(command=="check"){cout<<"OK · "<<app.pages.size()<<" pages, "<<app.components.size()<<" components, "<<app.state.size()<<" state variables\n";return 0;}

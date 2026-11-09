@@ -1,9 +1,9 @@
 # Shared app data survives a server restart.
-remember tasks as []
-state visits as 0
+save tasks as []
+set visits to 0
 
 component Navigation:
-    nav:
+    navigation:
         link "Tappyweb" /
         link "Tasks" /tasks
         link "About" /about

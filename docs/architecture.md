@@ -20,7 +20,7 @@ The browser executes the actual HTMX core; there is no custom frontend router or
 
 Types are string, number, boolean and list-of-strings. Top-level declarations initialize shared state. Loop values and form fields are local to an action and cannot replace global declarations.
 
-`remember` values are stored in a versioned, length-limited text format using quoted string encoding. Saves write a temporary file and atomically rename it in the same directory. Save failures roll back in-memory mutations. This provides atomic updates, not power-loss durability guarantees or database transactions across multiple processes. Existing saved types must match the source declaration.
+`save` values (legacy `remember`) are stored in a versioned, length-limited text format using quoted string encoding. Saves write a temporary file and atomically rename it in the same directory. Save failures roll back in-memory mutations. This provides atomic updates, not power-loss durability guarantees or database transactions across multiple processes. Existing saved types must match the source declaration.
 
 One mutex serializes state-dependent GET and POST handling. This intentionally simple design provides consistent local-app semantics; it is not tuned for high concurrency. Browser action tokens capture the current state revision; actions from an old revision refresh without mutating, preventing stale list indices deleting other items. Already-rendered pages in other browsers do not automatically update unless refreshed or given HTMX polling.
 
@@ -43,7 +43,7 @@ Both are vendored from upstream tagged releases. Updating them is a deliberate s
 
 `make test` runs Python-standard-library integration tests against the compiled CLI and real temporary localhost servers. It checks parsing diagnostics (including inactive branches), all example files, static builds, escaping, CSRF rejection, forms, HTMX navigation, redirects, fragments, persistence across restart, replay prevention, stale shared-state actions and rollback on runtime failure.
 
-A real-browser interaction check is separate from HTTP integration tests. In this environment, browser automation was unavailable and Chrome access was not approved, so browser click/visual behavior has not been verified.
+A real-browser interaction check is separate from HTTP integration tests. Native Studio smoke checks have verified HTMX button updates, saved-source reload, invalid-source recovery and runtime stopping in its embedded WebKit preview. See ../studio/README.md from the workspace root for Studio scope.
 
 ## Source reloading
 

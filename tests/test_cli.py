@@ -231,5 +231,102 @@ page "Before" /
         self.assertNotIn('<!doctype',body)
         self.assertIn('Code you can explain',body)
 
+    def test_new_syntax_tabs_comments_and_component_arguments(self):
+        path = self.source('''set count to 2 + 3 * 4 # Standard precedence.
+component Metric(label, value):
+	card:
+		subheading label
+		heading value
+component Wrapped(value):
+    use Metric("Computed, not a comment #", value * (2 + 1))
+page "New syntax" /
+	navigation bar:
+		link "Home" /
+	use Wrapped(count)
+	use Metric("Another", (1+2)*3)
+	text "Hashes # stay in strings"
+	if count + 1 >= (2 * 7):
+		text "Comparison works"
+''')
+        self.start(path)
+        _, _, body = self.page()
+        self.assertIn('<h1>42</h1>', body)
+        self.assertIn('<h1>9</h1>', body)
+        self.assertIn('Computed, not a comment #', body)
+        self.assertIn('Hashes # stay in strings', body)
+        self.assertIn('Comparison works', body)
+        self.assertIn('<nav', body)
+
+    def test_parameter_actions_capture_each_instance(self):
+        path = self.source('''set count to 0
+component Increment(amount):
+    button "Add {amount}":
+        on click:
+            set count to count + amount
+page "Bindings" /
+    text "Count {count}"
+    use Increment(2)
+    use Increment(5)
+''')
+        self.start(path)
+        cookie, csrf, body = self.page()
+        _, _, body = self.post(cookie, csrf, self.action(body, 1))
+        self.assertIn('Count 5', body)
+        _, _, body = self.post(cookie, csrf, self.action(body, 0))
+        self.assertIn('Count 7', body)
+
+    def test_save_and_clear_named_input(self):
+        path = self.source('''save tasks as []
+set latest to ""
+page "Form" /
+	form:
+		input "Task name" as draft required
+		button "Add task"
+		on submit:
+			add draft to tasks
+			clear draft
+			set latest to "After clear: [" + draft + "]"
+	text latest
+	for each task in tasks:
+		text task
+''')
+        self.start(path)
+        cookie, csrf, body = self.page()
+        _, _, body = self.post(cookie, csrf, self.action(body), draft='Keep this')
+        self.assertIn('Keep this', body)
+        self.assertIn('After clear: []', body)
+        self.server.terminate(); self.server.wait(timeout=5); self.server.stdout.close(); self.server = None
+        self.start(path)
+        self.assertIn('Keep this', self.page()[2])
+
+    def test_new_syntax_diagnostics(self):
+        cases = [
+            ('set count to 0\nset count to 1\npage "X" /\n    text count', 'already declared'),
+            ('set count to (1 + 2\npage "X" /\n    text count', 'Close the expression'),
+            ('page "X" /\n    button "Bad":\n        on click:\n            set missing to 1', 'declaredVariable'),
+            ('component Metric(label, value):\n    text label\npage "X" /\n    use Metric("Missing")', 'expects 2 arguments'),
+            ('component Metric(label, label):\n    text label\npage "X" /\n    text "x"', 'unique names'),
+            ('component Loop(value):\n    use Loop(value)\npage "X" /\n    use Loop(1)', 'include themselves'),
+            ('page "X" /\n\t  text "Bad indent"', 'four spaces or one tab'),
+            ('set value to 1\ncomponent A(value):\n    text value\npage "X" /\n    use A(2)', 'shadow global'),
+        ]
+        for code, diagnostic in cases:
+            with self.subTest(diagnostic=diagnostic):
+                result = self.cli('check', self.source(code))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(diagnostic, result.stderr)
+
+    def test_precedence_unary_and_left_associativity(self):
+        path = self.source('''set first to 2+3*4
+set second to (2+3)*4
+set third to 20/2/2
+set fourth to -2*-3 + 1e-2
+page "Math" /
+    text "{first}|{second}|{third}|{fourth}"
+''')
+        result = self.cli('build', path, '--out', self.dir / 'math')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('14|20|5|6.01', (self.dir / 'math/index.html').read_text())
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -1,5 +1,5 @@
-remember messages as []
-state notice as "Your feedback helps us build better."
+save messages as []
+set notice to "Your feedback helps us build better."
 
 page "Feedback" /
     stack:

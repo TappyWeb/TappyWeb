@@ -2,8 +2,8 @@ bin/
 src/assets.hpp
 .tappy-data/
 dist/
-__pycache__/
 releases/
+__pycache__/
 .DS_Store
 .env
 .env.*

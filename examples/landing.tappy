@@ -1,5 +1,5 @@
 component Navigation:
-    nav:
+    navigation:
         link "Little Garden" /
         link "Our story" /story
 

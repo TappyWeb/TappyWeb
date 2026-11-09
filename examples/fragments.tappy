@@ -1,4 +1,4 @@
-state completed as 7
+set completed to 7
 
 page "HTMX fragments" /
     stack:

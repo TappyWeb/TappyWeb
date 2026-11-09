@@ -1,8 +1,8 @@
-# Language reference · MVP 0.1
+# Language reference · MVP 0.2
 
 ## Files and blocks
 
-Use `.tappy`, four spaces per indentation level, and double quotes for literal text. Blank lines and `# comments` are allowed. Blocks can have a trailing colon; page declarations retain `page "Name" /route`. Tabs are errors. Strings support `\n`, `\t`, `\"` and `\\`.
+Use `.tappy`, one tab or four spaces per indentation level, and double quotes for literal text. A tab advances to the next four-column tab stop; tabs and spaces may coexist when they align to complete levels. Blank lines and `# comments` (including inline comments outside quoted strings) are allowed. Blocks can have a trailing colon; page declarations retain `page "Name" /route`. Strings support `\n`, `\t`, `\"` and `\\`.
 
 Names use letters, numbers and underscores and cannot start with a number. Routes are `/` or slash-separated segments using letters, numbers, `_` and `-`. No trailing slash, route parameters or reserved `/_tappy` paths.
 
@@ -20,17 +20,17 @@ page "About" /about
 Declare state at the top level. Variables keep their original type.
 
 ```tappy
-state count as 0
-state ready as false
-state greeting as "Hello"
-remember tasks as []
+set count to 0
+set ready to false
+set greeting to "Hello"
+save tasks as []
 ```
 
-`state` is memory-only. `remember` persists strings, numbers, booleans or lists between restarts. All state is app-wide. Lists start empty and contain strings.
+`set` declares memory-only state at the top level. `save` persists strings, numbers, booleans or lists between restarts. All state is app-wide. Lists start empty and contain strings.
 
 Read a variable with `text greeting`, or interpolate inside text: `text "You have {tasks.count} tasks"`. `.count` returns list length. There is no general expression interpolation inside braces: use a variable or `.count`.
 
-Arithmetic supports `+ - * /`, evaluated **left to right**; there are no parentheses or implicit precedence in this MVP. `set count to count + 1` updates a number. `+` joins strings if either operand is text. Define strings/numbers before using them in other declarations. An input named `draft` exposes text as either `draft` or `draft.value` in its event.
+Arithmetic supports `+ - * /`, parentheses and unary `+`/`-`. Multiplication and division take precedence over addition and subtraction; operators at the same precedence evaluate left to right. For example, `2 + 3 * 4` is 14, while `(2 + 3) * 4` is 20. Operators can touch their operands (`count+1`). `set count to count + 1` updates a number inside an event. Events may only update already-declared globals; they cannot silently create state. Duplicate top-level declarations are errors. `+` joins strings if either operand is text. Define strings/numbers before using them in other declarations. An input named `draft` exposes text as either `draft` or `draft.value` in its event.
 
 ## Elements and layout
 
@@ -44,7 +44,7 @@ Arithmetic supports `+ - * /`, evaluated **left to right**; there are no parenth
 | `image "https://example.com/photo.png" "Description"` | Image with required alt text |
 | `divider` | Horizontal rule |
 | `row`, `stack`, `grid`, `card` | Layout containers |
-| `section`, `nav`, `footer` | Semantic containers |
+| `section`, `navigation`, `footer` | Semantic containers |
 
 Put child elements inside layout containers. Heading, text, image and link children are limited to style/HTMX attributes. Buttons contain styles/HTMX attributes and optionally one `on click` block. Nesting forms is invalid. Use a form's submit event for submissions rather than a click event on its submit button.
 
@@ -83,11 +83,11 @@ Supported: `background`, `color`, `size`, `padding`, `rounded`, `gap`, `width`, 
 
 ## Components
 
-Components reuse UI and can read global state. Parameters are not supported yet.
+Components reuse UI and can read global state. Parameters are positional and scoped to each use. They may be text, numbers, booleans or lists. Arguments are expressions evaluated in the caller’s scope. Parameters cannot shadow global state names; `set` inside an event always updates a declared global. Event handlers capture the arguments of the particular component instance.
 
 ```tappy
 component Navigation:
-    nav:
+    navigation:
         link "Home" /
         link "About" /about
 
@@ -96,13 +96,25 @@ page "Home" /
     heading "Welcome"
 ```
 
-Recursive components are rejected.
+```tappy
+component Metric(label, value):
+    card:
+        subheading label
+        heading value
+
+page "Metrics" /
+    grid:
+        use Metric("Completed", completed)
+        use Metric("Goal", goal)
+```
+
+The example assumes `completed` and `goal` have been declared. Argument counts and duplicate parameter names are checked. Recursive components are rejected. Parameterized component bodies are checked at each use; unused parameterized bodies cannot be type-checked until arguments are supplied.
 
 ## Forms and actions
 
 ```tappy
-remember feedback as []
-state notice as "Tell us what you think."
+save feedback as []
+set notice to "Tell us what you think."
 
 page "Feedback" /
     heading "Feedback"
@@ -127,7 +139,7 @@ Actions:
 | `add draft.value to tasks` | Append text to a list |
 | `remove task from tasks` | Remove the current loop item by captured index |
 | `remove 0 from tasks` | Remove an item by zero-based numeric index |
-| `clear tasks` | Empty a list |
+| `clear tasks` / `clear draft` | Empty a list or named form input |
 | `open "/about"` | Navigate to a declared page and stop the action |
 | `stop` | Stop the current action |
 | `if ...`, `else` | Conditional actions |
@@ -160,7 +172,7 @@ Inside a loop, `task` is the item's text, and `task.index` is its zero-based ind
 The entire pinned HTMX core is served locally. Ordinary forms, buttons and navigation generate native HTMX attributes automatically. For additional behavior, use `htmx "attribute" "value"` inside an element.
 
 ```tappy
-state completed as 7
+set completed to 7
 
 page "Dashboard" /
     card:
@@ -179,3 +191,10 @@ A fragment route returns HTML without a document or `#app` wrapper. Fragments ar
 Supported attribute passthrough includes HTTP verbs, target, swap, trigger, boost, push/replace URL, select/select-oob, swap-oob, sync, include, params, vals, headers, confirm, prompt, indicator, disabled-elt, disable, disinherit/inherit, encoding, history/history-elt, preserve, request and validate. Values can interpolate variables. Only local endpoints implemented by your app/runtime will respond; defining an attribute does not implement an API endpoint.
 
 JavaScript evaluation, `hx-on` scripts, `js:` expressions and extensions are not enabled. For elements with automatic form/action/navigation behavior, overriding their generated request/target/swap attributes is rejected to avoid duplicate attributes. Put manual HTMX behavior on a separate element instead. Refer to the [official HTMX reference](https://htmx.org/reference/) for attribute semantics.
+
+
+## Compatibility and inputs
+
+Existing `state name as value`, `remember name as value` and `nav:` source remains supported. Prefer `set name to value`, `save name as value` and `navigation:` in new code. `navigation bar:` is also accepted. Existing saved-data files remain compatible.
+
+`clear draft` clears a named input in the current event, so subsequent expressions read an empty string. Successful form responses render a fresh empty form. `clear tasks` still empties a declared list. Numeric updates use `set count to count + 1`; `add item to tasks` is reserved for lists.

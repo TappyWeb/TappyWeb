@@ -1,0 +1,33 @@
+# Tabs and four-space indentation are both supported.
+set completed to 12
+set goal to 21
+set team to "Tappy team"
+
+component Navigation:
+	navigation:
+		link "Overview" /
+		link "Details" /details
+
+component Metric(label, value):
+	card:
+		subheading label
+		heading value
+
+page "Team overview" /
+	use Navigation
+	heading "Hello, {team}."
+	grid:
+		use Metric("Completed", completed)
+		use Metric("Goal", goal)
+	if completed >= goal:
+		text "Goal reached. Great work!"
+	else:
+		text "Keep going, one step at a time."
+	button "Complete one":
+		on click:
+			set completed to completed + 1 # Updates server state.
+
+page "Project details" /details
+	use Navigation
+	heading "A little progress every day."
+	text "Restarting restores the initial values."
