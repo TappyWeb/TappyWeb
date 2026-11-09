@@ -1,0 +1,64 @@
+# Shared app data survives a server restart.
+remember tasks as []
+state visits as 0
+
+component Navigation:
+    nav:
+        link "Tappyweb" /
+        link "Tasks" /tasks
+        link "About" /about
+
+page "Your next little win" /
+    use Navigation
+    stack:
+        heading "Big ideas. Small steps."
+        text "A working task app, written in a language you can read."
+        grid:
+            card:
+                subheading "Make something real"
+                text "Pages, forms and saved data. No JavaScript to write."
+            card:
+                subheading "Understand every line"
+                text "Readable code becomes HTML and HTMX requests."
+        button "Open my tasks":
+            on click:
+                open "/tasks"
+
+page "My tasks" /tasks
+    use Navigation
+    stack:
+        heading "One thing at a time."
+        text "{tasks.count} tasks in your shared notebook."
+        card:
+            form:
+                input "What will you work on?" as draft required placeholder "Build something you're proud of"
+                button "Add task"
+                on submit:
+                    add draft.value to tasks
+        if tasks.count is 0:
+            card:
+                subheading "Room for a new idea"
+                text "Add your first task above. It will still be here after a restart."
+        else:
+            stack:
+                for each task in tasks:
+                    card:
+                        row:
+                            text task
+                            button "Done":
+                                background "#24816d"
+                                on click:
+                                    remove task from tasks
+        text "This demo shares one notebook between browser sessions.":
+            muted
+
+page "About Tappyweb" /about
+    use Navigation
+    stack:
+        heading "Code you can explain."
+        text "Tappyweb turns indentation and readable instructions into a real website."
+        card:
+            subheading "How this app works"
+            text "Your browser sends an HTMX request. C++ updates the data and sends back HTML."
+            text "The remember command saves tasks on this computer."
+        link "Back to your notebook" /tasks

@@ -1,0 +1,22 @@
+remember messages as []
+state notice as "Your feedback helps us build better."
+
+page "Feedback" /
+    stack:
+        heading "Tell us what you think."
+        text notice
+        card:
+            form:
+                input "Your name" as name required
+                input "Email" as email type email required
+                textarea "Your feedback" as message required
+                button "Send feedback"
+                on submit:
+                    add "{name}: {message}" to messages
+                    set notice to "Thanks, {name}! Your feedback has been saved."
+        subheading "Community feedback"
+        if messages.count is 0:
+            text "Be the first to leave a message."
+        for each entry in messages:
+            card:
+                text entry

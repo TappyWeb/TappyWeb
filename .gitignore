@@ -1,0 +1,11 @@
+bin/
+src/assets.hpp
+.tappy-data/
+dist/
+__pycache__/
+releases/
+.DS_Store
+.env
+.env.*
+*.pem
+*.key

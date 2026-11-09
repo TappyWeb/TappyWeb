@@ -1,0 +1,19 @@
+state completed as 7
+
+page "HTMX fragments" /
+    stack:
+        heading "HTML, on demand."
+        text "Use native HTMX attributes when you need more control."
+        card:
+            id "stats"
+            htmx "hx-get" "/stats"
+            htmx "hx-trigger" "load, every 5s"
+            htmx "hx-swap" "innerHTML"
+            text "Loading the latest stats…"
+        button "Complete a task":
+            on click:
+                set completed to completed + 1
+
+fragment "Live stats" /stats
+    subheading "{completed} tasks completed"
+    text "This small HTML fragment comes from the C++ server."

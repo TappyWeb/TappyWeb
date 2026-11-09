@@ -1,0 +1,24 @@
+component Navigation:
+    nav:
+        link "Little Garden" /
+        link "Our story" /story
+
+page "Little Garden" /
+    use Navigation
+    stack:
+        heading "Grow a little curiosity."
+        text "A weekend garden club for people who love making things grow."
+        grid:
+            card:
+                subheading "Plant together"
+                text "Learn by doing, with a friendly group and a handful of seeds."
+            card:
+                subheading "Share what you learn"
+                text "Small experiments turn into stories worth sharing."
+        link "Read our story" /story
+
+page "Our story" /story
+    use Navigation
+    heading "It started with one seed."
+    text "Now we meet every Saturday to grow food and friendships."
+    link "Back to the garden" /

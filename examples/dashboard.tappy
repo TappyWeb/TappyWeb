@@ -1,0 +1,33 @@
+state completed as 12
+state goal as 215
+state team as "Tappy team"
+
+component Navigation:
+    nav:
+        link "Overview" /
+        link "Details" /details
+
+page "Team overview" /
+    use Navigation
+    stack:
+        heading "Hello, {team}."
+        text "A server-rendered dashboard with a reusable navigation component."
+        grid:
+            card:
+                subheading "Completed"
+                heading "{completed}"
+            card:
+                subheading "Goal"
+                heading "{goal}"
+        if completed >= goal:
+            text "Goal reached. Great work!"
+        else:
+            text "Keep going, one step at a time."
+        button "FUCK YOU NIGGHT OWL":
+            on click:
+                set completed to completed + 1
+
+page "Project details" /details
+    use Navigation
+    heading "A little progress every day."
+    text "This example uses memory-only state. Restarting restores the initial values."
