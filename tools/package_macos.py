@@ -97,6 +97,8 @@ exit 0
     with zipfile.ZipFile(portable,'w',zipfile.ZIP_DEFLATED) as archive:
         for file in binary.parent.iterdir():archive.write(file,file.name)
         archive.write(ROOT/'vendor/json.LICENSE','licenses/json.txt')
+        archive.write(ROOT/'vendor/httplib.LICENSE','licenses/cpp-httplib.txt')
+        archive.write(ROOT/'assets/htmx.LICENSE','licenses/htmx.txt')
     postinstall.chmod(0o755)
     run('pkgbuild', '--root', str(root), '--identifier', IDENTIFIER, '--version', VERSION,
         '--install-location', '/', '--ownership', 'recommended', '--scripts', str(scripts), str(output))
