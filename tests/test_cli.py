@@ -160,6 +160,60 @@ page "Test" /
         _, _, body = self.post(cookie, csrf, self.action(body))
         self.assertIn('Cannot divide by zero', body)
         self.assertIn('Count: 1', body)
+    def await_reload(self, version):
+        for _ in range(40):
+            response = self.request('GET', '/_tappy/reload?version=' + version)
+            if 'HX-Refresh' in response[1]:
+                return response
+            time.sleep(.05)
+        self.fail('Source watcher did not notice edit')
+
+    def test_named_pages_and_routes(self):
+        path = self.source('''set home to new page with name "Home":
+    suffix: home
+    link "Details" details
+    button "Details":
+        on click:
+            open details
+
+set details to new page with name "Details":
+    suffix: details
+    link "Home" home
+''')
+        self.assertEqual(self.cli('check', path).returncode, 0)
+        self.start(path)
+        _, _, body = self.request('GET', '/home')
+        self.assertIn('href="/details"', body)
+        self.assertIn('Home', self.request('GET', '/details')[2])
+        cookie, csrf, body = self.page('/home')
+        status, headers, result = self.post(cookie, csrf, self.action(body))
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get('HX-Push-Url'), '/details')
+        bad = self.source(path.read_text()+'\nset home to 2\n')
+        self.assertNotEqual(self.cli('check', bad).returncode, 0)
+
+    def test_live_reload_is_push_not_browser_polling(self):
+        path = self.source('page "One" /\n    text "Before"\n')
+        self.start(path)
+        _, _, body = self.page()
+        self.assertNotIn('every 500ms', body)
+        self.assertNotIn('hx-get="/_tappy/reload', body)
+        version = re.search(r'data-version="([a-f0-9]+)"', body)[1]
+        connection = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
+        try:
+            connection.request('GET', '/_tappy/events?version='+version)
+            stream = connection.getresponse()
+            self.assertEqual(stream.status, 200)
+            self.assertEqual(stream.readline(), b'retry: 10000\n')
+            self.assertEqual(stream.readline(), b': connected\n')
+            self.assertEqual(stream.readline(), b'\n')
+            path.write_text('page "Two" /\n    text "After"\n')
+            self.assertEqual(stream.readline(), b'event: change\n')
+            self.assertEqual(stream.readline(), b'data: reload\n')
+            self.assertIn('After', self.request('GET', '/')[2])
+        finally:
+            connection.close()
+
     def test_live_reload_preserves_state_and_invalidates_old_actions(self):
         original = '''remember count as 1
 page "Before" /
@@ -171,20 +225,20 @@ page "Before" /
         path = self.source(original)
         self.start(path, direct=True)
         cookie, csrf, body = self.page()
-        version = re.search(r'/_tappy/reload\?version=([a-f0-9]+)', body)[1]
+        version = re.search(r'data-version="([a-f0-9]+)"', body)[1]
         _, _, changed = self.post(cookie, csrf, self.action(body))
         stale_action = self.action(changed)
         # Simulate editors which save with atomic rename, not in-place writes.
         replacement = self.dir / 'replacement.tappy'
         replacement.write_text(original.replace('Before', 'After').replace('as 1', 'as 99') + '\npage "New route" /new\n    text "New route works"\n')
         replacement.replace(path)
-        status, headers, _ = self.request('GET', '/_tappy/reload?version=' + version)
+        status, headers, _ = self.await_reload(version)
         self.assertEqual(status, 204)
         self.assertEqual(headers['HX-Refresh'], 'true')
         _, _, new_body = self.request('GET', '/', headers={'Cookie': cookie})
         self.assertIn('After 2', new_body)
         self.assertNotIn('After 99', new_body)
-        new_version = re.search(r'/_tappy/reload\?version=([a-f0-9]+)', new_body)[1]
+        new_version = re.search(r'data-version="([a-f0-9]+)"', new_body)[1]
         self.assertNotEqual(new_version, version)
         self.assertNotIn('HX-Refresh', self.request('GET', '/_tappy/reload?version=' + new_version)[1])
         self.assertIn('New route works', self.request('GET', '/new')[2])
@@ -198,14 +252,14 @@ page "Before" /
         path = self.source('page "Working" /\n    text "Still working"\n')
         self.start(path)
         _, _, body = self.page()
-        version = re.search(r'/_tappy/reload\?version=([a-f0-9]+)', body)[1]
+        version = re.search(r'data-version="([a-f0-9]+)"', body)[1]
         path.write_text('page "Broken" /\n    mystery "bad"\n')
         self.assertNotIn('HX-Refresh', self.request('GET', '/_tappy/reload?version=' + version)[1])
         self.assertIn('Still working', self.request('GET', '/')[2])
         path.unlink()
         self.assertIn('Still working', self.request('GET', '/')[2])
         path.write_text('page "Fixed" /\n    text "Fixed without restart"\n')
-        self.assertEqual(self.request('GET', '/_tappy/reload?version=' + version)[1]['HX-Refresh'], 'true')
+        self.assertEqual(self.await_reload(version)[1]['HX-Refresh'], 'true')
         self.assertIn('Fixed without restart', self.request('GET', '/')[2])
 
     def test_native_htmx_fragments(self):

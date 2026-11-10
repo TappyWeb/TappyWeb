@@ -1,7 +1,8 @@
 save messages as []
 set notice to "Your feedback helps us build better."
 
-page "Feedback" /
+set feedback to new page with name "Feedback":
+    suffix: /
     stack:
         heading "Tell us what you think."
         text notice

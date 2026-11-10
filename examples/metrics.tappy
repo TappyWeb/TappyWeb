@@ -13,7 +13,8 @@ component Metric(label, value):
 		subheading label
 		heading value
 
-page "Team overview" /
+set team_overview to new page with name "Team overview":
+    suffix: /
 	use Navigation
 	heading "Hello, {team}."
 	grid:
@@ -27,7 +28,8 @@ page "Team overview" /
 		on click:
 			set completed to completed + 1 # Updates server state.
 
-page "Project details" /details
+set project_details to new page with name "Project details":
+    suffix: /details
 	use Navigation
 	heading "A little progress every day."
 	text "Restarting restores the initial values."

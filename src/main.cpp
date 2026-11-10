@@ -1,5 +1,6 @@
 #include "httplib.h"
 #include "assets.hpp"
+#include "update_support.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -11,6 +12,9 @@
 #include <sstream>
 #include <variant>
 #include <cmath>
+#include <thread>
+#include <condition_variable>
+#include <atomic>
 using namespace std;
 namespace fs = std::filesystem;
 struct Error : runtime_error { using runtime_error::runtime_error; };
@@ -56,8 +60,23 @@ string str(const Value& v) {if(auto p=get_if<string>(&v))return *p;if(auto p=get
 bool truth(const Value& v){if(auto p=get_if<bool>(&v))return *p;if(auto p=get_if<double>(&v))return *p!=0;if(auto p=get_if<List>(&v))return !p->empty();return !get<string>(v).empty();}
 bool ident(const string& s){return !s.empty()&&(isalpha((unsigned char)s[0])||s[0]=='_')&&all_of(s.begin(),s.end(),[](unsigned char c){return isalnum(c)||c=='_';});}
 struct Engine {
-    vector<Node> roots; map<string,const Node*> pages,components; set<string> fragments; Env state; set<string> persistent; map<string,int> declarations; size_t revision=0; map<string,vector<string>> parameters;
+    vector<Node> roots; map<string,const Node*> pages,components; set<string> fragments; Env state; set<string> persistent; map<string,int> declarations; size_t revision=0; map<string,vector<string>> parameters; map<string,string> namedRoutes;
     explicit Engine(vector<Node> r):roots(std::move(r)) {
+        for(auto& n:roots) {
+            auto& t=n.t;
+            if(t.size()<4||t[0].text!="set"||t[2].text!="to"||t[3].text!="new")continue;
+            if(t.size()!=8||!ident(t[1].text)||t[4].text!="page"||t[5].text!="with"||t[6].text!="name"||!t[7].quoted)
+                fail(n.line,"Write set home to new page with name \"Home\":");
+            string symbol=t[1].text,title=t[7].text,route;bool suffix=false;vector<Node> content;
+            for(auto& child:n.children) {
+                if(child.t[0].text!="suffix") { content.push_back(std::move(child));continue; }
+                if(suffix||child.t.size()!=3||child.t[1].text!=":"||!child.children.empty())fail(child.line,"Give the page one suffix: home, or suffix: / for the root.");
+                suffix=true;route=child.t[2].text;if(route.empty())route="/";else if(route[0]!='/')route="/"+route;
+            }
+            if(!suffix)fail(n.line,"Add suffix: home or suffix: / inside the named page.");
+            if(!namedRoutes.emplace(symbol,route).second)fail(n.line,"This page name is already declared.");
+            n.t={{"page",false},{title,true},{route,false}};n.children=std::move(content);
+        }
         for(auto& n:roots){auto& t=n.t;string k=t[0].text;
             if(k=="page"||k=="fragment") {if(t.size()!=3||!t[1].quoted||t[2].quoted||t[2].text.empty()||t[2].text[0]!='/')fail(n.line,"Write page \"Name\" /route.");string route=t[2].text;if(!regex_match(route,regex(R"(/([A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*)?)")))fail(n.line,"Use / or a route like /my-page, without trailing slashes.");if(route.find_first_of("?#\\<>{}")!=string::npos||route.find("..")!=string::npos||route.rfind("/_tappy",0)==0||route.rfind("//",0)==0)fail(n.line,"Use a local URL path outside /_tappy.");if(!pages.emplace(route,&n).second)fail(n.line,"This page route is already used.");if(k=="fragment"){if(route=="/")fail(n.line,"Use a non-root route for a fragment.");fragments.insert(route);}}
             else if(k=="component") {if(t.size()<2||!ident(t[1].text)||!components.emplace(t[1].text,&n).second)fail(n.line,"Give each component a unique name.");
@@ -65,14 +84,15 @@ struct Engine {
                 if(t.size()>2){if(t.size()<4||t[2].text!="("||t.back().text!=")")fail(n.line,"Write component Metric(label, value):");
                     for(size_t i=3;i+1<t.size();++i){if(!ident(t[i].text)||find(names.begin(),names.end(),t[i].text)!=names.end())fail(n.line,"Component parameters must have unique names.");names.push_back(t[i].text);if(i+2<t.size()){if(t[++i].text!=","||i+2==t.size())fail(n.line,"Separate component parameters with commas.");}}
                 }parameters[t[1].text]=names;}
-            else if(k=="remember"||k=="state"||k=="set"||k=="save") {if(t.size()<4||!ident(t[1].text)||(t[2].text!=(k=="set"?"to":"as"))||!n.children.empty())fail(n.line,"Write set count to 0 or save tasks as [].");string name=t[1].text;if(state.count(name))fail(n.line,"This variable is already declared.");state[name]=expr(t,3,t.size(),state,n.line);declarations[name]=n.line;if(k=="remember"||k=="save")persistent.insert(name);}
+            else if(k=="remember"||k=="state"||k=="set"||k=="save") {if(t.size()<4||!ident(t[1].text)||(t[2].text!=(k=="set"?"to":"as"))||!n.children.empty())fail(n.line,"Write set count to 0 or save tasks as [].");string name=t[1].text;if(state.count(name)||namedRoutes.count(name))fail(n.line,"This name is already declared.");state[name]=expr(t,3,t.size(),state,n.line);declarations[name]=n.line;if(k=="remember"||k=="save")persistent.insert(name);}
             else fail(n.line,"At the top level use page, fragment, component, set or save.");
         }
-        for(auto& [name,names]:parameters)for(auto& parameter:names)if(state.count(parameter))fail(components.at(name)->line,"Component parameters must not shadow global variables.");
+        for(auto& [name,names]:parameters)for(auto& parameter:names)if(state.count(parameter)||namedRoutes.count(parameter))fail(components.at(name)->line,"Component parameters must not shadow global variables.");
         if(pages.size()==fragments.size())throw Error("Add at least one page, for example: page \"Home\" /");
     }
     Value lookup(string name,const Env& e,int line) const {
         auto it=e.find(name);if(it!=e.end())return it->second;
+        auto page=namedRoutes.find(name);if(page!=namedRoutes.end())return page->second;
         if(name.ends_with(".value"))return lookup(name.substr(0,name.size()-6),e,line);
         if(name.ends_with(".count")){auto v=lookup(name.substr(0,name.size()-6),e,line);if(auto p=get_if<List>(&v))return double(p->size());fail(line,".count works on a list.");}
         fail(line,"I don't know '"+name+"'. Declare it with set/save, or name an input with as.");
@@ -146,7 +166,7 @@ string token(){static random_device rd;ostringstream s;for(int i=0;i<4;++i)s<<he
 struct InputRule {string name,type="text";bool required=false;};
 void gatherInputs(const Engine& app,const vector<Node>& nodes,map<string,InputRule>& result,set<string> seen={}) {
     for(auto& n:nodes){auto& t=n.t;string k=t[0].text;
-        if((k=="input"||k=="textarea")&&t.size()>=4){InputRule r;r.name=t[3].text;for(size_t i=4;i<t.size();++i){if(t[i].text=="required")r.required=true;else if(t[i].text=="type"&&i+1<t.size())r.type=t[++i].text;}if(app.state.count(r.name)||result.count(r.name))fail(n.line,"Input names must be unique on a page and different from state names.");result[r.name]=r;}
+        if((k=="input"||k=="textarea")&&t.size()>=4){InputRule r;r.name=t[3].text;for(size_t i=4;i<t.size();++i){if(t[i].text=="required")r.required=true;else if(t[i].text=="type"&&i+1<t.size())r.type=t[++i].text;}if(app.state.count(r.name)||app.namedRoutes.count(r.name)||result.count(r.name))fail(n.line,"Input names must be unique on a page and different from state names.");result[r.name]=r;}
         if(k=="use"&&t.size()>=2&&app.components.count(t[1].text)){if(!seen.insert(t[1].text).second)fail(n.line,"Components cannot include themselves.");gatherInputs(app,app.components.at(t[1].text)->children,result,seen);seen.erase(t[1].text);}
         gatherInputs(app,n.children,result,seen);
     }
@@ -194,12 +214,12 @@ struct Renderer {
             if(k=="else"){if(!previousIf||t.size()!=1)fail(n.line,"Put else immediately after if.");if(!matched)out+=render(n.children,e,locals);previousIf=false;continue;}
             previousIf=false;if(styles.count(k)||k=="on")continue;
             if(k=="if"){matched=app.condition(n,e);previousIf=true;if(matched)out+=render(n.children,e,locals);continue;}
-            if(k=="for"){if(t.size()!=5||t[1].text!="each"||!ident(t[2].text)||t[3].text!="in")fail(n.line,"Write for each task in tasks:");Value v=app.lookup(t[4].text,e,n.line);auto list=get_if<List>(&v);if(!list)fail(n.line,"Loop over a list declared as [].");for(size_t i=0;i<list->size();++i){Env next=e,l=locals;next[t[2].text]=l[t[2].text]=(*list)[i];next[t[2].text+".index"]=l[t[2].text+".index"]=double(i);out+=render(n.children,next,l);}continue;}
+            if(k=="for"){if(t.size()!=5||t[1].text!="each"||(!ident(t[2].text)||app.namedRoutes.count(t[2].text))||t[3].text!="in")fail(n.line,"Write for each task in tasks:");Value v=app.lookup(t[4].text,e,n.line);auto list=get_if<List>(&v);if(!list)fail(n.line,"Loop over a list declared as [].");for(size_t i=0;i<list->size();++i){Env next=e,l=locals;next[t[2].text]=l[t[2].text]=(*list)[i];next[t[2].text+".index"]=l[t[2].text+".index"]=double(i);out+=render(n.children,next,l);}continue;}
             if(k=="use"){auto [name,bound]=app.bind(n,e);Env scoped=e,captured=locals;for(auto& [key,value]:bound)scoped[key]=captured[key]=value;if(!expanding.insert(name).second)fail(n.line,"Components cannot include themselves.");out+=render(app.components.at(name)->children,scoped,captured);expanding.erase(name);continue;}
             auto savedInputs=activeInputs;string tag,body,attrs;bool leaf=false;
             if(containers.count(k)){if(t.size()!=1)fail(n.line,k+" takes no arguments.");tag=k=="nav"||k=="section"||k=="footer"?k:"div";attrs=" class=\""+k+"\"";}
             else if(k=="heading"||k=="subheading"||k=="text"){tag=k=="heading"?"h1":k=="subheading"?"h2":"p";body=esc(text(n,1,t.size(),e));}
-            else if(k=="link"){if(t.size()!=3||!t[1].quoted)fail(n.line,"Write link \"Label\" /path.");tag="a";body=esc(text(n,1,2,e));string url=safeURL(t[2].quoted?app.interpolate(t[2].text,e,n.line):t[2].text,n.line);attrs=" href=\""+esc(url)+"\"";if(app.pages.count(url)&&!app.fragments.count(url))attrs+=" hx-get=\""+esc(url)+"\" hx-target=\"#app\" hx-swap=\"outerHTML\" hx-push-url=\"true\"";}
+            else if(k=="link"){if(t.size()!=3||!t[1].quoted)fail(n.line,"Write link \"Label\" /path.");tag="a";body=esc(text(n,1,2,e));string url=safeURL(t[2].quoted?app.interpolate(t[2].text,e,n.line):(app.namedRoutes.count(t[2].text)?app.namedRoutes.at(t[2].text):t[2].text),n.line);attrs=" href=\""+esc(url)+"\"";if(app.pages.count(url)&&!app.fragments.count(url))attrs+=" hx-get=\""+esc(url)+"\" hx-target=\"#app\" hx-swap=\"outerHTML\" hx-push-url=\"true\"";}
             else if(k=="button"){tag="button";body=esc(text(n,1,t.size(),e));auto ev=event(n,"click");attrs=ev?" type=\"button\""+actionAttrs(*ev,locals,n)+" hx-include=\"closest main\"":" type=\"submit\"";}
             else if(k=="form"){if(t.size()!=1)fail(n.line,"Write form: with inputs inside.");if(!activeInputs.empty())fail(n.line,"Forms cannot be nested.");tag="form";gatherInputs(app,n.children,activeInputs);auto ev=event(n,"submit");if(!ev)fail(n.line,"Add on submit: inside this form.");attrs=actionAttrs(*ev,locals,n)+" method=\"post\"";}
             else if(k=="input"||k=="textarea") {
@@ -255,7 +275,7 @@ void validate(Engine& app) {
             if(k=="on"){if(app.fragments.count(route))fail(n.line,"Fragments are read-only views. Put actions on a page.");if(parent!="button"&&parent!="form")fail(n.line,"Put on click inside a button, or on submit inside a form.");if(n.t.size()!=2||n.t[1].text!=(parent=="button"?"click":"submit"))fail(n.line,"This event doesn't match its element.");Env locals=e;for(auto& [key,v]:app.state)locals.erase(key);Executor exec{app,locals};for(auto& [name,rule]:inputs){(void)rule;exec.inputNames.insert(name);}exec.run(n.children,true);continue;}
             if(styles.count(k)){if(parent=="page"||containers.count(parent)||parent=="heading"||parent=="subheading"||parent=="text"||parent=="button"||parent=="link"||parent=="form"||parent=="image"){}else fail(n.line,"Put style commands inside an element.");if(!n.children.empty())fail(n.line,"Style commands cannot contain a block.");}
             if(k=="if")app.condition(n,e);
-            if(k=="for"){auto& t=n.t;if(t.size()!=5||t[1].text!="each"||!ident(t[2].text)||t[3].text!="in")fail(n.line,"Write for each task in tasks:");auto v=app.lookup(t[4].text,e,n.line);if(!holds_alternative<List>(v))fail(n.line,"Loop over a list.");child[t[2].text]=string("Example");child[t[2].text+".index"]=0.0;}
+            if(k=="for"){auto& t=n.t;if(t.size()!=5||t[1].text!="each"||(!ident(t[2].text)||app.namedRoutes.count(t[2].text))||t[3].text!="in")fail(n.line,"Write for each task in tasks:");auto v=app.lookup(t[4].text,e,n.line);if(!holds_alternative<List>(v))fail(n.line,"Loop over a list.");child[t[2].text]=string("Example");child[t[2].text+".index"]=0.0;}
             if(k=="use"){auto [componentName,bound]=app.bind(n,e);Env scoped=e;for(auto& [name,value]:bound)scoped[name]=value;if(!n.children.empty())fail(n.line,"use takes no nested commands.");if(!used.insert(n.t[1].text).second)fail(n.line,"Components cannot include themselves.");walk(app.components.at(componentName)->children,scoped,parent);used.erase(n.t[1].text);}
             // Render each node with dummy loop locals, so empty lists and false branches still get checked.
             if(k!="for"&&k!="if"&&k!="else"&&k!="use"&&k!="on"&&!styles.count(k)){Node copy=n;copy.children.erase(remove_if(copy.children.begin(),copy.children.end(),[](const Node& c){return c.t[0].text!="on"&&!styles.count(c.t[0].text);}),copy.children.end());Renderer r{app,session,route};r.render({copy},e);}
@@ -267,16 +287,15 @@ void validate(Engine& app) {
     for(auto& [name,node]:app.components){(void)name;if(node->children.empty())fail(node->line,"A component needs content.");}
 }
 string document(const string& title,const string& body,const string& prefix="/_tappy/",const string& liveVersion="") {
-    return "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"htmx-config\" content='{\"allowEval\":false,\"allowScriptTags\":false,\"selfRequestsOnly\":true}'><title>"+esc(title)+"</title><link rel=\"stylesheet\" href=\""+prefix+"default.css\"><script src=\""+prefix+"htmx.min.js\" defer></script></head><body>"+body+(liveVersion.empty()?"":"<div hidden hx-get=\"/_tappy/reload?version="+liveVersion+"\" hx-trigger=\"every 500ms\" hx-swap=\"none\"></div>")+"</body></html>";
+    return "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"htmx-config\" content='{\"allowEval\":false,\"allowScriptTags\":false,\"selfRequestsOnly\":true}'><title>"+esc(title)+"</title><link rel=\"stylesheet\" href=\""+prefix+"default.css\"><script src=\""+prefix+"htmx.min.js\" defer></script></head><body>"+body+(liveVersion.empty()?"":"<script src=\"/_tappy/live.js\" data-version=\""+liveVersion+"\" defer></script>")+"</body></html>";
 }
 fs::path dataPath(const fs::path& source){auto name=source.filename();name+=".state";return source.parent_path()/".tappy-data"/name;}
 void save(const Engine& app,const fs::path& path){if(app.persistent.empty())return;fs::create_directories(path.parent_path());ostringstream o;o<<"TAPPY_STATE_1\n";for(auto& name:app.persistent){const Value& v=app.state.at(name);o<<quoted(name)<<' '<<v.index()<<' ';if(auto list=get_if<List>(&v)){o<<list->size();for(auto& item:*list)o<<' '<<quoted(item);}else o<<quoted(str(v));o<<'\n';}auto temp=path;temp+=".tmp";writeFile(temp,o.str());fs::rename(temp,path);}
 void load(Engine& app,const fs::path& path){if(!fs::exists(path))return;istringstream in(readFile(path));string magic;getline(in,magic);if(magic!="TAPPY_STATE_1")throw Error("Unrecognized state file: "+pathText(path));string name;size_t type;while(in>>quoted(name)>>type){Value v;if(type==3){size_t count;if(!(in>>count)||count>10000)throw Error("Invalid saved list.");List list;for(size_t i=0;i<count;++i){string s;if(!(in>>quoted(s)))throw Error("Incomplete saved list.");list.push_back(s);}v=list;}else{string s;if(!(in>>quoted(s)))throw Error("Incomplete saved value.");if(type==0)v=s;else if(type==1){size_t consumed=0;double d=stod(s,&consumed);if(consumed!=s.size()||!isfinite(d))throw Error("Invalid saved number.");v=d;}else if(type==2){if(s!="true"&&s!="false")throw Error("Invalid saved boolean.");v=s=="true";}else throw Error("Unknown saved value type.");}if(app.persistent.count(name)){if(app.state.at(name).index()!=v.index())throw Error("Saved type changed for "+name+". Move the state file aside before changing its type.");app.state[name]=v;}}if(!in.eof())throw Error("Invalid state file: "+pathText(path));}
 void security(httplib::Response& res){res.set_header("X-Content-Type-Options","nosniff");res.set_header("Referrer-Policy","same-origin");res.set_header("Cache-Control","no-store");res.set_header("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: http:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");}
 void serve(Engine& app,const fs::path& source,int port){
-    load(app,dataPath(source));httplib::Server server;mutex lock;map<string,Session> sessions;auto started=chrono::steady_clock::now();
-    // Polling requests also pass through here, so edits reload even without user interaction.
-    // All AST replacement and action invalidation happens under the state mutex.
+    load(app,dataPath(source));httplib::Server server;server.new_task_queue=[] { return new httplib::ThreadPool(16,128); };mutex lock;condition_variable changed;atomic<int> streams{0};map<string,Session> sessions;auto started=chrono::steady_clock::now();
+    // One source watcher serves all browsers. Browser reload uses a persistent SSE connection.
     string lastSource=readFile(source),liveVersion=token(),lastReadError;
     auto refreshSource=[&] {
         string next;
@@ -297,14 +316,41 @@ void serve(Engine& app,const fs::path& source,int port){
             save(candidate,dataPath(source));
             for(auto& [id,session]:sessions){(void)id;session.actions.clear();}
             app=std::move(candidate);
-            liveVersion=token();
+            liveVersion=token();changed.notify_all();
             cout<<"Reloaded "<<pathText(source.filename())<<" · preserved matching state variables\n"<<flush;
         } catch(const exception& e) {
             cerr<<"Reload failed; keeping the last working version: "<<e.what()<<'\n'<<flush;
         }
     };
-    server.set_pre_routing_handler([&](const httplib::Request&,httplib::Response&){
-        lock_guard guard(lock);refreshSource();return httplib::Server::HandlerResponse::Unhandled;
+    auto watchedTime=fs::last_write_time(source);auto watchedSize=fs::file_size(source);
+    jthread watcher([&](stop_token stop) {
+        while(!stop.stop_requested()) {
+            this_thread::sleep_for(chrono::milliseconds(250));
+            error_code error;auto time=fs::last_write_time(source,error);if(error)continue;
+            auto size=fs::file_size(source,error);if(error||(time==watchedTime&&size==watchedSize))continue;
+            watchedTime=time;watchedSize=size;lock_guard guard(lock);refreshSource();
+        }
+    });
+    server.Get("/_tappy/live.js",[](const auto&,auto& res) {
+        res.set_content(R"JS((()=>{const version=document.currentScript.dataset.version;const events=new EventSource('/_tappy/events?version='+encodeURIComponent(version));events.addEventListener('change',()=>{events.close();location.reload();});addEventListener('pagehide',()=>events.close(),{once:true});})();)JS","text/javascript; charset=utf-8");
+    });
+    server.Get("/_tappy/events",[&](const httplib::Request& req,httplib::Response& res) {
+        if(streams.fetch_add(1)>=8) { --streams;res.status=503;res.set_header("Retry-After","10");return; }
+        auto seen=make_shared<string>(req.has_param("version")?req.get_param_value("version"):"");
+        auto first=make_shared<bool>(true);security(res);res.set_header("Cache-Control","no-cache");res.set_header("X-Accel-Buffering","no");
+        res.set_chunked_content_provider("text/event-stream",[&,seen,first](size_t,httplib::DataSink& sink) {
+            if(*first) { *first=false;const string initial="retry: 10000\n: connected\n\n";return sink.write(initial.data(),initial.size()); }
+            unique_lock guard(lock);changed.wait_for(guard,chrono::seconds(25),[&]{return *seen!=liveVersion||!server.is_running();});
+            if(!server.is_running())return false;
+            bool update=*seen!=liveVersion;*seen=liveVersion;guard.unlock();
+            string event=update?"event: change\ndata: reload\n\n":": keep-alive\n\n";
+            return sink.write(event.data(),event.size());
+        },[&](bool){--streams;});
+    });
+    server.Get("/_tappy/routes",[&](const httplib::Request&,httplib::Response& res) {
+        lock_guard guard(lock);security(res);string body="[";bool first=true;
+        for(auto& [route,node]:app.pages){(void)node;if(app.fragments.count(route))continue;if(!first)body+=",";first=false;body+="\""+route+"\"";}
+        res.set_content(body+"]","application/json; charset=utf-8");
     });
     server.Get("/_tappy/reload",[&](const httplib::Request& req,httplib::Response& res){
         lock_guard guard(lock);security(res);res.status=204;
@@ -329,11 +375,16 @@ void serve(Engine& app,const fs::path& source,int port){
     if(!server.listen("127.0.0.1",port))throw Error("Cannot listen on port "+to_string(port)+". Try --port with a different number.");
 }
 int tappyMain(int argc,char** argv){try{
-    if(argc<2||string(argv[1])=="--help"){cout<<"Tappyweb 0.2 — a small, readable web language\n\n  tappy file.tappy [--port 3000]\n  tappy check file.tappy\n  tappy serve file.tappy [--port 3000]\n  tappy build file.tappy [--out dist]\n\nbuild exports static pages; use serve for forms and state changes.\n";return 0;}string command=argv[1];if(command=="--version"){cout<<"tappy 0.2.0\n";return 0;}bool direct=utf8Path(command).extension()==".tappy";int sourceIndex=direct?1:2;if(direct)command="serve";if(command!="check"&&command!="serve"&&command!="build")throw Error("Unknown command. Use tappy file.tappy or run tappy --help.");if(argc<=sourceIndex)throw Error("Give a .tappy source file.");fs::path source=fs::absolute(utf8Path(argv[sourceIndex]));filename=pathText(source);int port=3000;fs::path out="dist";
+    if(int forwarded=tappy_update::forward(argc,argv);forwarded!=-1)return forwarded;
+    if(argc>1&&string(argv[1])=="update") {
+        auto helper=tappy_update::helper();if(!fs::exists(helper))throw Error("The update helper is missing. Install the latest package from GitHub.");
+        return tappy_update::process({helper,"--force",tappy_update::version});
+    }
+    if(argc<2||string(argv[1])=="--help"){cout<<"Tappyweb 0.3 — a small, readable web language\n\n  tappy file.tappy [--port 3000]\n  tappy check file.tappy\n  tappy update\n  tappy serve file.tappy [--port 3000]\n  tappy build file.tappy [--out dist]\n\nbuild exports static pages; use serve for forms and state changes.\n";return 0;}string command=argv[1];if(command=="--version"){cout<<"tappy 0.3.0\n";return 0;}bool direct=utf8Path(command).extension()==".tappy";int sourceIndex=direct?1:2;if(direct)command="serve";if(command!="check"&&command!="serve"&&command!="build")throw Error("Unknown command. Use tappy file.tappy or run tappy --help.");if(argc<=sourceIndex)throw Error("Give a .tappy source file.");fs::path source=fs::absolute(utf8Path(argv[sourceIndex]));filename=pathText(source);int port=3000;fs::path out="dist";
     for(int i=sourceIndex+1;i<argc;++i){string opt=argv[i];if(i+1>=argc)throw Error("Missing value after "+opt);string value=argv[++i];if(opt=="--port"&&command=="serve"){if(value.empty()||!all_of(value.begin(),value.end(),[](unsigned char c){return isdigit(c);})||value.size()>5)throw Error("Port must be 1–65535.");port=stoi(value);if(port<1||port>65535)throw Error("Port must be 1–65535.");}else if(opt=="--out"&&command=="build")out=utf8Path(value);else throw Error("Unknown option: "+opt);}
     Engine app(parse(readFile(source)));validate(app);
     if(command=="check"){cout<<"OK · "<<app.pages.size()<<" pages, "<<app.components.size()<<" components, "<<app.state.size()<<" state variables\n";return 0;}
-    if(command=="serve"){serve(app,source,port);return 0;}
+    if(command=="serve"){tappy_update::check_in_background();serve(app,source,port);return 0;}
     // Generate everything first; a dynamic-page error must not leave a partial export.
     map<fs::path,string> files;Session session;for(auto& [route,node]:app.pages){Renderer renderer{app,session,route,true};string body=renderer.page();fs::path rel=route=="/"?fs::path("index.html"):fs::path(route.substr(1))/"index.html";files[rel]=app.fragments.count(route)?body:document(node->t[1].text,body,"/_tappy/");}
     fs::create_directories(out/"_tappy");for(auto& [rel,html]:files){fs::create_directories((out/rel).parent_path());writeFile(out/rel,html);}writeFile(out/"_tappy/htmx.min.js",string(htmx_js));writeFile(out/"_tappy/default.css",string(default_css));cout<<"Built "<<files.size()<<" static pages in "<<pathText(fs::absolute(out))<<"\n";return 0;

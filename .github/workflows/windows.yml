@@ -1,5 +1,7 @@
 name: Windows CLI
 on: [push, pull_request, workflow_dispatch]
+env:
+  TAPPY_NO_UPDATE: '1'
 permissions:
   contents: read
 jobs:
@@ -16,6 +18,9 @@ jobs:
       - name: Build and package
         shell: pwsh
         run: ./tools/package_windows.ps1
+      - name: Test updater
+        shell: pwsh
+        run: ./build/windows-x64/Release/tappy-update.exe --self-test
       - name: Test PATH helper
         shell: pwsh
         run: ./tools/test_windows_env.ps1 -Helper ./build/windows-x64/Release/tappy-env.exe
@@ -27,6 +32,9 @@ jobs:
           $env:TAPPY_TEST_BINARY = "$PWD/build/windows-x64/Release/tappy.exe"
           python tests/test_cli.py
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Test installer and file association
+        shell: pwsh
+        run: ./tools/test_windows_install.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: tappy-windows-x64

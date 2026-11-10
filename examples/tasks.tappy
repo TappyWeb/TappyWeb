@@ -8,7 +8,8 @@ component Navigation:
         link "Tasks" /tasks
         link "About" /about
 
-page "Your next little win" /
+set your_next_little_win to new page with name "Your next little win":
+    suffix: /
     use Navigation
     stack:
         heading "Big ideas. Small steps."
@@ -24,7 +25,8 @@ page "Your next little win" /
             on click:
                 open "/tasks"
 
-page "My tasks" /tasks
+set my_tasks to new page with name "My tasks":
+    suffix: /tasks
     use Navigation
     stack:
         heading "One thing at a time."
@@ -52,7 +54,8 @@ page "My tasks" /tasks
         text "This demo shares one notebook between browser sessions.":
             muted
 
-page "About Tappyweb" /about
+set about_tappyweb to new page with name "About Tappyweb":
+    suffix: /about
     use Navigation
     stack:
         heading "Code you can explain."

@@ -47,6 +47,6 @@ A real-browser interaction check is separate from HTTP integration tests. Native
 
 ## Source reloading
 
-Serving installs a pre-routing hook which compares the source contents on each request, including a lightweight browser poll every 500 ms. This follows editor atomic-save renames without platform-specific filesystem dependencies or a background watcher thread. With no browser or HTTP requests, recompilation waits until the next request.
+One server watcher checks source metadata every 250 ms, including editor atomic-save renames. It reads and validates only changed files. Browsers hold a bounded Server-Sent Events connection rather than sending periodic reload requests. Idle connections receive a keep-alive every 25 seconds; successful edits trigger one reload event.
 
-A changed source is parsed and validated as a candidate engine. Same-name/same-type live values are copied, every route is rendered with those values, and persistent state is saved before swapping engines under the state mutex. Errors keep the old engine and print diagnostics once per changed source contents. Missing/unreadable files keep the running app available. A successful swap clears all action tokens before destroying the old AST, and changes the source version token. Poll requests for older versions receive `HX-Refresh: true`, handled by the bundled HTMX library. Static exports do not include this hook.
+A changed source is parsed and validated as a candidate engine. Same-name/same-type live values are copied and routes validated before swapping engines under the state mutex. Errors keep the working app available. A successful swap clears old action tokens and notifies connected browsers. Static exports do not include live reload.

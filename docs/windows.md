@@ -4,7 +4,7 @@ The Windows x64 package contains the native C++ `tappy.exe`, examples, documenta
 
 ## NSIS installer
 
-Run `Tappyweb-0.2.0-Windows-x64-Setup.exe`. It installs the CLI for the current user and adds its directory to your user PATH by default. Open a new Terminal window, then run `tappy file.tappy`. Installation and uninstallation appear under Windows Installed apps; the uninstaller removes the PATH entry only if this installer added it. Custom logo sideart appears on welcome and finish pages.
+Run `Tappyweb-0.3.0-Windows-x64-Setup.exe`. It installs the CLI for the current user and adds its directory to your user PATH by default. Open a new Terminal window, then run `tappy file.tappy`. Installation and uninstallation appear under Windows Installed apps; the uninstaller removes the PATH entry only if this installer added it. Custom logo sideart appears on welcome and finish pages.
 
 ## Run without installing
 
@@ -56,7 +56,9 @@ python3 tools/embed.py
 /path/to/llvm-mingw/bin/x86_64-w64-mingw32-clang++ \
   -std=c++20 -O2 -static -municode -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 \
   -Ivendor src/main.cpp -lws2_32 -o /tmp/tappy.exe
-python3 tools/package_windows.py --binary /tmp/tappy.exe \
+/path/to/llvm-mingw/bin/x86_64-w64-mingw32-clang++ \
+  -std=c++20 -O2 -static -Ivendor tools/updater.cpp -lwinhttp -lbcrypt -o /tmp/tappy-update.exe
+python3 tools/package_windows.py --binary /tmp/tappy.exe --updater /tmp/tappy-update.exe \
   --toolchain-license /path/to/llvm-mingw/LICENSE.TXT
 ```
 

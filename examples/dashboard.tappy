@@ -7,7 +7,8 @@ component Navigation:
 		link "Overview" /
 		link "Details" /details
 
-page "Team overview" /
+set team_overview to new page with name "Team overview":
+    suffix: /
 	use Navigation
 	heading "Hello, {team}."
 	text "A server-rendered dashboard with a reusable navigation component."
@@ -26,7 +27,8 @@ page "Team overview" /
 		on click:
 			set completed to completed + 1 # Updates state on the server.
 
-page "Project details" /details
+set project_details to new page with name "Project details":
+    suffix: /details
 	use Navigation
 	heading "A little progress every day."
 	text "This example uses memory-only state. Restarting restores the initial 12 completed tasks."

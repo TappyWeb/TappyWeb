@@ -4,19 +4,19 @@ Unicode true
 !include "WinVer.nsh"
 !include "x64.nsh"
 !define PRODUCT "Tappyweb"
-!define VERSION "0.2.0"
+!define VERSION "0.3.0"
 !define KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\TappywebCLI"
 Name "${PRODUCT} ${VERSION}"
 OutFile "${OUTPUT}"
 InstallDir "$LOCALAPPDATA\Programs\Tappyweb"
 InstallDirRegKey HKCU "${KEY}" "InstallLocation"
-VIProductVersion "0.2.0.0"
+VIProductVersion "0.3.0.0"
 VIAddVersionKey /LANG=1033 "ProductName" "Tappyweb"
 VIAddVersionKey /LANG=1033 "CompanyName" "TappyWeb"
 VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright (c) 2026 TappyWeb"
 VIAddVersionKey /LANG=1033 "FileDescription" "Tappyweb Installer"
-VIAddVersionKey /LANG=1033 "FileVersion" "0.2.0"
-VIAddVersionKey /LANG=1033 "ProductVersion" "0.2.0"
+VIAddVersionKey /LANG=1033 "FileVersion" "0.3.0"
+VIAddVersionKey /LANG=1033 "ProductVersion" "0.3.0"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 ShowInstDetails show
@@ -66,6 +66,17 @@ Section "Tappyweb language" MainSection
   WriteRegStr HKCU "${KEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
   WriteRegDWORD HKCU "${KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${KEY}" "NoRepair" 1
+  ReadRegStr $0 HKCU "Software\Classes\.tappy" ""
+  ${If} $0 != "Tappyweb.Source"
+    WriteRegStr HKCU "${KEY}" "PreviousAssociation" "$0"
+  ${EndIf}
+  WriteRegStr HKCU "Software\Classes\.tappy" "" "Tappyweb.Source"
+  WriteRegStr HKCU "Software\Classes\.tappy\OpenWithProgids" "Tappyweb.Source" ""
+  WriteRegStr HKCU "Software\Classes\Tappyweb.Source" "" "Tappyweb source"
+  WriteRegStr HKCU "Software\Classes\Tappyweb.Source\DefaultIcon" "" "$INSTDIR\AppIcon.ico"
+  WriteRegStr HKCU "Software\Classes\Tappyweb.Source\shell\open\command" "" '"$SYSDIR\cmd.exe" /d /s /k ""$INSTDIR\tappy.exe" "%1""'
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+
 SectionEnd
 Section "Terminal command (user PATH)" PathSection
   ClearErrors
@@ -87,6 +98,18 @@ Function un.onInit
   SetRegView 64
 FunctionEnd
 Section "Uninstall"
+  ReadRegStr $0 HKCU "Software\Classes\.tappy" ""
+  ${If} $0 == "Tappyweb.Source"
+    ReadRegStr $0 HKCU "${KEY}" "PreviousAssociation"
+    ${If} $0 == ""
+      DeleteRegValue HKCU "Software\Classes\.tappy" ""
+    ${Else}
+      WriteRegStr HKCU "Software\Classes\.tappy" "" "$0"
+    ${EndIf}
+  ${EndIf}
+  DeleteRegValue HKCU "Software\Classes\.tappy\OpenWithProgids" "Tappyweb.Source"
+  DeleteRegKey HKCU "Software\Classes\Tappyweb.Source"
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
   ReadRegDWORD $0 HKCU "${KEY}" "PathAdded"
   ${If} $0 == 1
     ClearErrors

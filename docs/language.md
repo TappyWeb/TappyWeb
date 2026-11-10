@@ -1,4 +1,22 @@
-# Language reference · MVP 0.2
+# Language reference · MVP 0.3
+
+## Named pages and reusable routes
+
+```tappy
+set home to new page with name "Home":
+    suffix: home
+    heading "Welcome"
+    link "Details" details
+
+set details to new page with name "Details":
+    suffix: details
+    link "Home" home
+    button "Back":
+        on click:
+            open home
+```
+
+`suffix: home` means `/home` on the current site (for example `app.com/home`). Use `suffix: /` for the root. Names are immutable page references usable by `link`, `open`, and `{interpolation}`. They cannot collide with state names. Links can refer to pages declared later in the file. A named page must have exactly one suffix. Existing `page "Home" /home` declarations remain supported.
 
 ## Files and blocks
 
@@ -198,3 +216,15 @@ JavaScript evaluation, `hx-on` scripts, `js:` expressions and extensions are not
 Existing `state name as value`, `remember name as value` and `nav:` source remains supported. Prefer `set name to value`, `save name as value` and `navigation:` in new code. `navigation bar:` is also accepted. Existing saved-data files remain compatible.
 
 `clear draft` clears a named input in the current event, so subsequent expressions read an empty string. Successful form responses render a fresh empty form. `clear tasks` still empties a declared list. Numeric updates use `set count to count + 1`; `add item to tasks` is reserved for lists.
+
+## Live source updates
+
+Browsers keep one server-sent event connection open. The server notifies them when valid source changes; the browser then reloads. There is no half-second HTTP polling loop. A small filesystem watcher checks metadata four times per second once per server, not once per browser, and reads/compiles the file only when it changes. Idle connections send a keepalive every 25 seconds. Up to eight live-change connections are admitted, with separate thread capacity kept for normal requests.
+
+## Automatic language updates
+
+Installed runtime packages check the public `TappyWeb/TappyWeb` GitHub release at most once per day, in the background when serving. Updates must have an official release archive and a matching GitHub SHA256 digest. They are unpacked in a versioned, per-user cache and take effect on the next invocation. An active server keeps its current runtime. No administrator permission is needed for a runtime update.
+
+Run `tappy update` to check immediately. Set `TAPPY_NO_UPDATE=1` to disable both automatic checks and forwarding to a cached newer version. Check/build commands do not initiate network checks. Studio has no separate automatic updater or GitHub login.
+
+The language installer registers `.tappy` sources to launch in Terminal on macOS or Command Prompt on Windows. OS-level default-app preferences can retain an existing association; choose Tappyweb in Open With if the OS preserves an earlier selection.

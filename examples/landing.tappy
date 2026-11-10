@@ -3,7 +3,8 @@ component Navigation:
         link "Little Garden" /
         link "Our story" /story
 
-page "Little Garden" /
+set little_garden to new page with name "Little Garden":
+    suffix: /
     use Navigation
     stack:
         heading "Grow a little curiosity."
@@ -17,7 +18,8 @@ page "Little Garden" /
                 text "Small experiments turn into stories worth sharing."
         link "Read our story" /story
 
-page "Our story" /story
+set our_story to new page with name "Our story":
+    suffix: /story
     use Navigation
     heading "It started with one seed."
     text "Now we meet every Saturday to grow food and friendships."

@@ -1,6 +1,7 @@
 set completed to 7
 
-page "HTMX fragments" /
+set htmx_fragments to new page with name "HTMX fragments":
+    suffix: /
     stack:
         heading "HTML, on demand."
         text "Use native HTMX attributes when you need more control."

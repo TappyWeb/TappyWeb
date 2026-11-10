@@ -103,7 +103,7 @@ Arithmetic supports normal operator precedence, parentheses and unary signs. Tex
 make pkg
 ```
 
-This builds `releases/Tappyweb-0.2.0-macOS-universal.pkg` for Apple Silicon and Intel, targeting macOS 13+. It installs `tappy` in `/usr/local/bin` and examples in `/usr/local/share/tappyweb`.
+This builds `releases/Tappyweb-0.3.0-macOS-universal.pkg` for Apple Silicon and Intel, targeting macOS 13+. It installs `tappy` in `/usr/local/bin` and examples in `/usr/local/share/tappyweb`.
 
 After installation:
 
@@ -115,7 +115,7 @@ The recipient runs the compiled executable without a compiler, Python or a separ
 
 ## Current scope
 
-Tappyweb **0.2 is an early language MVP**, well suited to local prototypes and small interactive tools. Syntax may evolve. Legacy `state`, `remember` and `nav` declarations remain supported.
+Tappyweb **0.3 is an early language MVP**, well suited to local prototypes and small interactive tools. Syntax may evolve. Legacy `state`, `remember` and `nav` declarations remain supported.
 
 State is shared across browser sessions. Saved values live beside the source in `.tappy-data/`; they are local app storage, not user accounts or a concurrent database. The server binds to `127.0.0.1`. Keep one server process per source/data file.
 
@@ -138,3 +138,20 @@ Use the native Windows x64 package to run `tappy file.tappy` from Windows Termin
 
 
 The macOS PKG installs `/usr/local/bin/tappy` and `/etc/paths.d/tappyweb`. After installation, open a new Terminal window and run `tappy file.tappy`.
+
+## Named pages, fewer requests
+
+```tappy
+set home to new page with name "Home":
+    suffix: home
+    heading "Welcome"
+    link "More details" details
+
+set details to new page with name "Details":
+    suffix: details
+    link "Back home" home
+```
+
+Page names are reusable route references: `home` resolves to `/home` on the current site. The Library in Mac Studio uses this syntax throughout. Legacy pages remain valid.
+
+Live reload now uses server-sent notifications instead of polling the server twice per second. Installed runtimes can stage SHA256-verified updates from public GitHub releases, at most daily, and apply them on the next command. `tappy update` checks immediately; `TAPPY_NO_UPDATE=1` disables this behavior. Double-click `.tappy` files after installing to launch them in your terminal. See [the language reference](docs/language.md) for details.
