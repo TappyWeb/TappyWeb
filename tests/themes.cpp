@@ -11,6 +11,8 @@ int main(){
   require(css.find("/* url(fake.png) */")!=std::string::npos);
   require(css.find("content: \"url(fake.png)\"")!=std::string::npos);
   require(css.find("https://example.com/themes/dark/fonts.css")!=std::string::npos);
+  require(absolute("image.png","https://example.com")=="https://example.com/image.png");
+  bool credentials=false;try{normalize("https://user:password@example.com/theme.css");}catch(...){credentials=true;}require(credentials);
   int calls=0;Theme theme;
   auto download=[&](const std::string&,const fs::path& output){++calls;std::ofstream file(output);file<<":root { --tappy-accent: red; }";};
   theme.load("https://example.com/theme.css",folder/"page.tappy",download,folder/"cache");require(calls==1&&theme.css.find("red")!=std::string::npos);

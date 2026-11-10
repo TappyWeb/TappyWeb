@@ -16,6 +16,7 @@ inline std::string normalize(std::string value) {
     std::smatch match;if(std::regex_match(value,match,github))value="https://raw.githubusercontent.com/"+match[1].str()+"/"+match[2].str()+"/"+match[3].str();
     if(value.empty()||value.find_first_of("\r\n")!=std::string::npos)throw std::runtime_error("Give theme a CSS path or HTTPS URL.");
     if(value.find("://")!=std::string::npos&&value.rfind("https://",0)!=0)throw std::runtime_error("Remote themes require an HTTPS URL.");
+    if(value.rfind("https://",0)==0){auto host=value.substr(8,value.find_first_of("/?#",8)-8);if(host.empty()||host.find('@')!=std::string::npos||value.find_first_of(" \t")!=std::string::npos)throw std::runtime_error("Use a public HTTPS theme URL without embedded credentials.");}
     return value;
 }
 inline std::string read(const fs::path& path) {
@@ -42,7 +43,7 @@ inline void fetch(const std::string& url,const fs::path& output) {
     std::ofstream file(output,std::ios::binary);char buffer[32768];size_t total=0;DWORD count=0;
     while(true){if(!WinHttpReadData(request,buffer,sizeof(buffer),&count))throw std::runtime_error("Incomplete theme download.");if(!count)break;total+=count;if(total>limit)throw std::runtime_error("Theme CSS must be smaller than 2 MB.");file.write(buffer,count);if(!file)throw std::runtime_error("Cannot cache theme.");}
 #else
-    if(tappy_update::process({"/usr/bin/curl","--fail","--location","--silent","--proto","=https","--proto-redir","=https","--connect-timeout","5","--max-time","20","--max-filesize",std::to_string(limit),"--output",output,"--url",url})!=0)throw std::runtime_error("Cannot download theme. Check its raw CSS URL.");
+    if(tappy_update::process({"/usr/bin/curl","--disable","--fail","--location","--silent","--proto","=https","--proto-redir","=https","--connect-timeout","5","--max-time","20","--max-filesize",std::to_string(limit),"--output",output,"--url",url})!=0)throw std::runtime_error("Cannot download theme. Check its raw CSS URL.");
 #endif
 }
 // Relative remote asset URLs keep their meaning after CSS is served locally.
@@ -51,7 +52,7 @@ inline std::string absolute(const std::string& value,const std::string& base) {
     auto slash=base.find('/',8);auto origin=base.substr(0,slash);
     if(value.rfind("//",0)==0)return "https:"+value;
     if(value[0]=='/')return origin+value;
-    auto clean=base.substr(0,base.find_first_of("?#"));return clean.substr(0,clean.rfind('/')+1)+value;
+    auto clean=base.substr(0,base.find_first_of("?#"));if(clean.find('/',8)==std::string::npos)return clean+"/"+value;return clean.substr(0,clean.rfind('/')+1)+value;
 }
 inline std::string remote_assets(const std::string& css,const std::string& base) {
     // Match comments and ordinary strings first so their contents remain untouched.
