@@ -20,8 +20,10 @@ string filename;
 [[noreturn]] void fail(int line, const string& s) { throw Error(filename+":"+to_string(line)+": "+s); }
 string trim(string s) { auto a=s.find_first_not_of(" \r\n\t"); return a==string::npos?"":s.substr(a,s.find_last_not_of(" \r\n\t")-a+1); }
 string esc(const string& s) { string r; for(char c:s) switch(c){case '&':r+="&amp;";break;case '<':r+="&lt;";break;case '>':r+="&gt;";break;case '"':r+="&quot;";break;case '\'':r+="&#39;";break;default:r+=c;} return r; }
-string readFile(const fs::path& p) { ifstream f(p,ios::binary); if(!f) throw Error("Cannot read "+p.string()); return string(istreambuf_iterator<char>(f),{}); }
-void writeFile(const fs::path& p, const string& s) { ofstream f(p,ios::binary); if(!f || !(f<<s)) throw Error("Cannot write "+p.string()); f.close(); if(!f) throw Error("Cannot finish writing "+p.string()); }
+fs::path utf8Path(const string& text) { u8string value;for(unsigned char c:text)value+=char8_t(c);return fs::path(value); }
+string pathText(const fs::path& path) { auto value=path.u8string();return string(reinterpret_cast<const char*>(value.data()),value.size()); }
+string readFile(const fs::path& p) { ifstream f(p,ios::binary); if(!f) throw Error("Cannot read "+pathText(p)); return string(istreambuf_iterator<char>(f),{}); }
+void writeFile(const fs::path& p, const string& s) { ofstream f(p,ios::binary); if(!f || !(f<<s)) throw Error("Cannot write "+pathText(p)); f.close(); if(!f) throw Error("Cannot finish writing "+pathText(p)); }
 vector<Token> lex(string s,int line) {
     vector<Token> ts; size_t i=0;
     while(i<s.size()) {
@@ -267,9 +269,9 @@ void validate(Engine& app) {
 string document(const string& title,const string& body,const string& prefix="/_tappy/",const string& liveVersion="") {
     return "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"htmx-config\" content='{\"allowEval\":false,\"allowScriptTags\":false,\"selfRequestsOnly\":true}'><title>"+esc(title)+"</title><link rel=\"stylesheet\" href=\""+prefix+"default.css\"><script src=\""+prefix+"htmx.min.js\" defer></script></head><body>"+body+(liveVersion.empty()?"":"<div hidden hx-get=\"/_tappy/reload?version="+liveVersion+"\" hx-trigger=\"every 500ms\" hx-swap=\"none\"></div>")+"</body></html>";
 }
-fs::path dataPath(const fs::path& source){return source.parent_path()/".tappy-data"/(source.filename().string()+".state");}
+fs::path dataPath(const fs::path& source){auto name=source.filename();name+=".state";return source.parent_path()/".tappy-data"/name;}
 void save(const Engine& app,const fs::path& path){if(app.persistent.empty())return;fs::create_directories(path.parent_path());ostringstream o;o<<"TAPPY_STATE_1\n";for(auto& name:app.persistent){const Value& v=app.state.at(name);o<<quoted(name)<<' '<<v.index()<<' ';if(auto list=get_if<List>(&v)){o<<list->size();for(auto& item:*list)o<<' '<<quoted(item);}else o<<quoted(str(v));o<<'\n';}auto temp=path;temp+=".tmp";writeFile(temp,o.str());fs::rename(temp,path);}
-void load(Engine& app,const fs::path& path){if(!fs::exists(path))return;istringstream in(readFile(path));string magic;getline(in,magic);if(magic!="TAPPY_STATE_1")throw Error("Unrecognized state file: "+path.string());string name;size_t type;while(in>>quoted(name)>>type){Value v;if(type==3){size_t count;if(!(in>>count)||count>10000)throw Error("Invalid saved list.");List list;for(size_t i=0;i<count;++i){string s;if(!(in>>quoted(s)))throw Error("Incomplete saved list.");list.push_back(s);}v=list;}else{string s;if(!(in>>quoted(s)))throw Error("Incomplete saved value.");if(type==0)v=s;else if(type==1){size_t consumed=0;double d=stod(s,&consumed);if(consumed!=s.size()||!isfinite(d))throw Error("Invalid saved number.");v=d;}else if(type==2){if(s!="true"&&s!="false")throw Error("Invalid saved boolean.");v=s=="true";}else throw Error("Unknown saved value type.");}if(app.persistent.count(name)){if(app.state.at(name).index()!=v.index())throw Error("Saved type changed for "+name+". Move the state file aside before changing its type.");app.state[name]=v;}}if(!in.eof())throw Error("Invalid state file: "+path.string());}
+void load(Engine& app,const fs::path& path){if(!fs::exists(path))return;istringstream in(readFile(path));string magic;getline(in,magic);if(magic!="TAPPY_STATE_1")throw Error("Unrecognized state file: "+pathText(path));string name;size_t type;while(in>>quoted(name)>>type){Value v;if(type==3){size_t count;if(!(in>>count)||count>10000)throw Error("Invalid saved list.");List list;for(size_t i=0;i<count;++i){string s;if(!(in>>quoted(s)))throw Error("Incomplete saved list.");list.push_back(s);}v=list;}else{string s;if(!(in>>quoted(s)))throw Error("Incomplete saved value.");if(type==0)v=s;else if(type==1){size_t consumed=0;double d=stod(s,&consumed);if(consumed!=s.size()||!isfinite(d))throw Error("Invalid saved number.");v=d;}else if(type==2){if(s!="true"&&s!="false")throw Error("Invalid saved boolean.");v=s=="true";}else throw Error("Unknown saved value type.");}if(app.persistent.count(name)){if(app.state.at(name).index()!=v.index())throw Error("Saved type changed for "+name+". Move the state file aside before changing its type.");app.state[name]=v;}}if(!in.eof())throw Error("Invalid state file: "+pathText(path));}
 void security(httplib::Response& res){res.set_header("X-Content-Type-Options","nosniff");res.set_header("Referrer-Policy","same-origin");res.set_header("Cache-Control","no-store");res.set_header("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: http:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");}
 void serve(Engine& app,const fs::path& source,int port){
     load(app,dataPath(source));httplib::Server server;mutex lock;map<string,Session> sessions;auto started=chrono::steady_clock::now();
@@ -296,7 +298,7 @@ void serve(Engine& app,const fs::path& source,int port){
             for(auto& [id,session]:sessions){(void)id;session.actions.clear();}
             app=std::move(candidate);
             liveVersion=token();
-            cout<<"Reloaded "<<source.filename().string()<<" · preserved matching state variables\n"<<flush;
+            cout<<"Reloaded "<<pathText(source.filename())<<" · preserved matching state variables\n"<<flush;
         } catch(const exception& e) {
             cerr<<"Reload failed; keeping the last working version: "<<e.what()<<'\n'<<flush;
         }
@@ -326,13 +328,25 @@ void serve(Engine& app,const fs::path& source,int port){
     cout<<"Tappyweb · C++20 + HTMX\nhttp://127.0.0.1:"<<port<<"\n"<<app.pages.size()<<" pages · shared app state · "<<chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now()-started).count()<<" ms setup\nWatching source for changes. Press Ctrl+C to stop.\n"<<flush;
     if(!server.listen("127.0.0.1",port))throw Error("Cannot listen on port "+to_string(port)+". Try --port with a different number.");
 }
-int main(int argc,char** argv){try{
-    if(argc<2||string(argv[1])=="--help"){cout<<"Tappyweb 0.2 — a small, readable web language\n\n  tappy file.tappy [--port 3000]\n  tappy check file.tappy\n  tappy serve file.tappy [--port 3000]\n  tappy build file.tappy [--out dist]\n\nbuild exports static pages; use serve for forms and state changes.\n";return 0;}string command=argv[1];if(command=="--version"){cout<<"tappy 0.2.0\n";return 0;}bool direct=fs::path(command).extension()==".tappy";int sourceIndex=direct?1:2;if(direct)command="serve";if(command!="check"&&command!="serve"&&command!="build")throw Error("Unknown command. Use tappy file.tappy or run tappy --help.");if(argc<=sourceIndex)throw Error("Give a .tappy source file.");fs::path source=fs::absolute(argv[sourceIndex]);filename=source.string();int port=3000;fs::path out="dist";
-    for(int i=sourceIndex+1;i<argc;++i){string opt=argv[i];if(i+1>=argc)throw Error("Missing value after "+opt);string value=argv[++i];if(opt=="--port"&&command=="serve"){if(value.empty()||!all_of(value.begin(),value.end(),[](unsigned char c){return isdigit(c);})||value.size()>5)throw Error("Port must be 1–65535.");port=stoi(value);if(port<1||port>65535)throw Error("Port must be 1–65535.");}else if(opt=="--out"&&command=="build")out=value;else throw Error("Unknown option: "+opt);}
+int tappyMain(int argc,char** argv){try{
+    if(argc<2||string(argv[1])=="--help"){cout<<"Tappyweb 0.2 — a small, readable web language\n\n  tappy file.tappy [--port 3000]\n  tappy check file.tappy\n  tappy serve file.tappy [--port 3000]\n  tappy build file.tappy [--out dist]\n\nbuild exports static pages; use serve for forms and state changes.\n";return 0;}string command=argv[1];if(command=="--version"){cout<<"tappy 0.2.0\n";return 0;}bool direct=utf8Path(command).extension()==".tappy";int sourceIndex=direct?1:2;if(direct)command="serve";if(command!="check"&&command!="serve"&&command!="build")throw Error("Unknown command. Use tappy file.tappy or run tappy --help.");if(argc<=sourceIndex)throw Error("Give a .tappy source file.");fs::path source=fs::absolute(utf8Path(argv[sourceIndex]));filename=pathText(source);int port=3000;fs::path out="dist";
+    for(int i=sourceIndex+1;i<argc;++i){string opt=argv[i];if(i+1>=argc)throw Error("Missing value after "+opt);string value=argv[++i];if(opt=="--port"&&command=="serve"){if(value.empty()||!all_of(value.begin(),value.end(),[](unsigned char c){return isdigit(c);})||value.size()>5)throw Error("Port must be 1–65535.");port=stoi(value);if(port<1||port>65535)throw Error("Port must be 1–65535.");}else if(opt=="--out"&&command=="build")out=utf8Path(value);else throw Error("Unknown option: "+opt);}
     Engine app(parse(readFile(source)));validate(app);
     if(command=="check"){cout<<"OK · "<<app.pages.size()<<" pages, "<<app.components.size()<<" components, "<<app.state.size()<<" state variables\n";return 0;}
     if(command=="serve"){serve(app,source,port);return 0;}
     // Generate everything first; a dynamic-page error must not leave a partial export.
     map<fs::path,string> files;Session session;for(auto& [route,node]:app.pages){Renderer renderer{app,session,route,true};string body=renderer.page();fs::path rel=route=="/"?fs::path("index.html"):fs::path(route.substr(1))/"index.html";files[rel]=app.fragments.count(route)?body:document(node->t[1].text,body,"/_tappy/");}
-    fs::create_directories(out/"_tappy");for(auto& [rel,html]:files){fs::create_directories((out/rel).parent_path());writeFile(out/rel,html);}writeFile(out/"_tappy/htmx.min.js",string(htmx_js));writeFile(out/"_tappy/default.css",string(default_css));cout<<"Built "<<files.size()<<" static pages in "<<fs::absolute(out)<<"\n";
+    fs::create_directories(out/"_tappy");for(auto& [rel,html]:files){fs::create_directories((out/rel).parent_path());writeFile(out/rel,html);}writeFile(out/"_tappy/htmx.min.js",string(htmx_js));writeFile(out/"_tappy/default.css",string(default_css));cout<<"Built "<<files.size()<<" static pages in "<<pathText(fs::absolute(out))<<"\n";return 0;
 }catch(const exception& e){cerr<<e.what()<<'\n';return 1;}}
+
+#ifdef _WIN32
+int wmain(int argc,wchar_t** wideArguments) {
+    SetConsoleOutputCP(CP_UTF8);
+    vector<string> values;vector<char*> arguments;
+    for(int i=0;i<argc;++i){int length=WideCharToMultiByte(CP_UTF8,0,wideArguments[i],-1,nullptr,0,nullptr,nullptr);if(length<=0)return 1;string value(size_t(length),'\0');WideCharToMultiByte(CP_UTF8,0,wideArguments[i],-1,value.data(),length,nullptr,nullptr);value.pop_back();values.push_back(std::move(value));}
+    for(auto& value:values)arguments.push_back(value.data());
+    return tappyMain(argc,arguments.data());
+}
+#else
+int main(int argc,char** argv) { return tappyMain(argc,argv); }
+#endif

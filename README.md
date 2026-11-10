@@ -40,7 +40,7 @@ make
 
 Open **http://127.0.0.1:3000**. Edit the file and save. The running app reloads automatically, keeping matching state values. Invalid edits leave the last working version running and show a filename/line diagnostic.
 
-Building requires a **C++20 compiler, Make and Python 3**. On macOS, install Apple's Command Line Tools with `xcode-select --install`. Python is used for build tooling and tests; the compiled app runs as a single executable. macOS is tested; Linux can be built with a suitable toolchain (`make CXX=g++`), and Windows users can use WSL.
+Building requires a **C++20 compiler, Make and Python 3**. On macOS, install Apple's Command Line Tools with `xcode-select --install`. Python is used for build tooling and tests; the compiled app runs as a single executable. macOS is tested; Linux can be built with a suitable toolchain (`make CXX=g++`), and Windows has a native CMake build.
 
 ## Small syntax. Real interactions.
 
@@ -130,3 +130,11 @@ make test
 The integration suite exercises the real executable and HTTP server: forms, saved state, escaping, CSRF checks, stale actions, atomic rollback, live reload, component parameters, arithmetic and indentation.
 
 Tappyweb Studio is developed separately. This repository contains the language, runtime, examples and CLI packaging.
+
+
+## Windows
+
+Use the native Windows x64 package to run `tappy file.tappy` from Windows Terminal. The NSIS Setup.exe installs the command and its user PATH entry. A portable ZIP is also available. See the [Windows guide](docs/windows.md) for installation, native builds and cross-compilation. Windows builds are cross-compiled on macOS; native CI and Windows UI testing must run separately.
+
+
+The macOS PKG installs `/usr/local/bin/tappy` and `/etc/paths.d/tappyweb`. After installation, open a new Terminal window and run `tappy file.tappy`.

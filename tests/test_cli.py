@@ -328,5 +328,18 @@ page "Math" /
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('14|20|5|6.01', (self.dir / 'math/index.html').read_text())
 
+    def test_unicode_source_paths_and_saved_state(self):
+        path = self.dir / 'Проект' / 'страница.tappy'
+        path.parent.mkdir()
+        path.write_text('save count as 1\npage "Unicode" /\n\ttext "Count {count}"\n\tbutton "Add":\n\t\ton click:\n\t\t\tset count to count + 1\n', encoding='utf-8')
+        self.assertEqual(self.cli('check', path).returncode, 0)
+        self.start(path)
+        cookie, csrf, body = self.page()
+        self.assertIn('Count 2', self.post(cookie, csrf, self.action(body))[2])
+        self.assertTrue((path.parent / '.tappy-data' / 'страница.tappy.state').exists())
+        self.server.terminate(); self.server.wait(timeout=5); self.server.stdout.close(); self.server = None
+        self.start(path)
+        self.assertIn('Count 2', self.page()[2])
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

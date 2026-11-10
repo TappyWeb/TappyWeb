@@ -43,8 +43,16 @@ with tempfile.TemporaryDirectory(prefix='tappy-pkg-') as tmp:
     licenses.mkdir()
     shutil.copy2(ROOT / 'vendor/httplib.LICENSE', licenses / 'cpp-httplib.txt')
     shutil.copy2(ROOT / 'assets/htmx.LICENSE', licenses / 'htmx.txt')
-    # No install scripts, daemons, PATH edits, or background services.
+    # macOS path_helper reads this for new login shells, including Terminal's default zsh.
+    paths = root / 'etc/paths.d'
+    paths.mkdir(parents=True)
+    (paths / 'tappyweb').write_text('/usr/local/bin\n')
+    scripts = Path(tmp) / 'scripts'
+    scripts.mkdir()
+    postinstall = scripts / 'postinstall'
+    postinstall.write_text('#!/bin/sh\nset -eu\nTARGET_VOLUME="${3:-/}"\n/bin/chmod 755 "$TARGET_VOLUME/usr/local/bin/tappy"\n"$TARGET_VOLUME/usr/local/bin/tappy" --version >/dev/null\nexit 0\n')
+    postinstall.chmod(0o755)
     run('pkgbuild', '--root', str(root), '--identifier', IDENTIFIER, '--version', VERSION,
-        '--install-location', '/', '--ownership', 'recommended', str(output))
+        '--install-location', '/', '--ownership', 'recommended', '--scripts', str(scripts), str(output))
 print(f'Installer: {output}')
 print('Installs tappy to /usr/local/bin; requires no compiler or Python on the recipient Mac.')

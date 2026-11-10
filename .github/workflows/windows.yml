@@ -1,0 +1,35 @@
+name: Windows CLI
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --yes --no-progress
+      - name: Build and package
+        shell: pwsh
+        run: ./tools/package_windows.ps1
+      - name: Test PATH helper
+        shell: pwsh
+        run: ./tools/test_windows_env.ps1 -Helper ./build/windows-x64/Release/tappy-env.exe
+      - name: Test the Windows executable
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          $env:TAPPY_TEST_BINARY = "$PWD/build/windows-x64/Release/tappy.exe"
+          python tests/test_cli.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tappy-windows-x64
+          path: |
+            releases/*windows-x64.zip
+            releases/*Windows-x64-Setup.exe
