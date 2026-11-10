@@ -1,6 +1,7 @@
 #include "httplib.h"
 #include "assets.hpp"
 #include "update_support.hpp"
+#include "themes.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -60,7 +61,7 @@ string str(const Value& v) {if(auto p=get_if<string>(&v))return *p;if(auto p=get
 bool truth(const Value& v){if(auto p=get_if<bool>(&v))return *p;if(auto p=get_if<double>(&v))return *p!=0;if(auto p=get_if<List>(&v))return !p->empty();return !get<string>(v).empty();}
 bool ident(const string& s){return !s.empty()&&(isalpha((unsigned char)s[0])||s[0]=='_')&&all_of(s.begin(),s.end(),[](unsigned char c){return isalnum(c)||c=='_';});}
 struct Engine {
-    vector<Node> roots; map<string,const Node*> pages,components; set<string> fragments; Env state; set<string> persistent; map<string,int> declarations; size_t revision=0; map<string,vector<string>> parameters; map<string,string> namedRoutes;
+    vector<Node> roots; map<string,const Node*> pages,components; set<string> fragments; Env state; set<string> persistent; map<string,int> declarations; size_t revision=0; map<string,vector<string>> parameters; map<string,string> namedRoutes; string theme;
     explicit Engine(vector<Node> r):roots(std::move(r)) {
         for(auto& n:roots) {
             auto& t=n.t;
@@ -84,6 +85,7 @@ struct Engine {
                 if(t.size()>2){if(t.size()<4||t[2].text!="("||t.back().text!=")")fail(n.line,"Write component Metric(label, value):");
                     for(size_t i=3;i+1<t.size();++i){if(!ident(t[i].text)||find(names.begin(),names.end(),t[i].text)!=names.end())fail(n.line,"Component parameters must have unique names.");names.push_back(t[i].text);if(i+2<t.size()){if(t[++i].text!=","||i+2==t.size())fail(n.line,"Separate component parameters with commas.");}}
                 }parameters[t[1].text]=names;}
+            else if(k=="set"&&t.size()>=2&&t[1].text=="theme") {if(!theme.empty()||t.size()!=4||t[2].text!="to"||!t[3].quoted||!n.children.empty())fail(n.line,"Write one top-level set theme to \"./theme.css\".");theme=tappy_theme::normalize(t[3].text);}
             else if(k=="remember"||k=="state"||k=="set"||k=="save") {if(t.size()<4||!ident(t[1].text)||(t[2].text!=(k=="set"?"to":"as"))||!n.children.empty())fail(n.line,"Write set count to 0 or save tasks as [].");string name=t[1].text;if(state.count(name)||namedRoutes.count(name))fail(n.line,"This name is already declared.");state[name]=expr(t,3,t.size(),state,n.line);declarations[name]=n.line;if(k=="remember"||k=="save")persistent.insert(name);}
             else fail(n.line,"At the top level use page, fragment, component, set or save.");
         }
@@ -286,14 +288,15 @@ void validate(Engine& app) {
     // Reject unused components with invalid commands too, by validating through a temporary page.
     for(auto& [name,node]:app.components){(void)name;if(node->children.empty())fail(node->line,"A component needs content.");}
 }
-string document(const string& title,const string& body,const string& prefix="/_tappy/",const string& liveVersion="") {
-    return "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"htmx-config\" content='{\"allowEval\":false,\"allowScriptTags\":false,\"selfRequestsOnly\":true}'><title>"+esc(title)+"</title><link rel=\"stylesheet\" href=\""+prefix+"default.css\"><script src=\""+prefix+"htmx.min.js\" defer></script></head><body>"+body+(liveVersion.empty()?"":"<script src=\"/_tappy/live.js\" data-version=\""+liveVersion+"\" defer></script>")+"</body></html>";
+string document(const string& title,const string& body,const string& prefix="/_tappy/",const string& liveVersion="",bool themed=false) {
+    return "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"htmx-config\" content='{\"allowEval\":false,\"allowScriptTags\":false,\"selfRequestsOnly\":true}'><title>"+esc(title)+"</title><link rel=\"stylesheet\" href=\""+prefix+"default.css\">"+(themed?"<link rel=\"stylesheet\" href=\""+prefix+"theme.css\">":"")+"<script src=\""+prefix+"htmx.min.js\" defer></script></head><body>"+body+(liveVersion.empty()?"":"<script src=\"/_tappy/live.js\" data-version=\""+liveVersion+"\" defer></script>")+"</body></html>";
 }
 fs::path dataPath(const fs::path& source){auto name=source.filename();name+=".state";return source.parent_path()/".tappy-data"/name;}
 void save(const Engine& app,const fs::path& path){if(app.persistent.empty())return;fs::create_directories(path.parent_path());ostringstream o;o<<"TAPPY_STATE_1\n";for(auto& name:app.persistent){const Value& v=app.state.at(name);o<<quoted(name)<<' '<<v.index()<<' ';if(auto list=get_if<List>(&v)){o<<list->size();for(auto& item:*list)o<<' '<<quoted(item);}else o<<quoted(str(v));o<<'\n';}auto temp=path;temp+=".tmp";writeFile(temp,o.str());fs::rename(temp,path);}
 void load(Engine& app,const fs::path& path){if(!fs::exists(path))return;istringstream in(readFile(path));string magic;getline(in,magic);if(magic!="TAPPY_STATE_1")throw Error("Unrecognized state file: "+pathText(path));string name;size_t type;while(in>>quoted(name)>>type){Value v;if(type==3){size_t count;if(!(in>>count)||count>10000)throw Error("Invalid saved list.");List list;for(size_t i=0;i<count;++i){string s;if(!(in>>quoted(s)))throw Error("Incomplete saved list.");list.push_back(s);}v=list;}else{string s;if(!(in>>quoted(s)))throw Error("Incomplete saved value.");if(type==0)v=s;else if(type==1){size_t consumed=0;double d=stod(s,&consumed);if(consumed!=s.size()||!isfinite(d))throw Error("Invalid saved number.");v=d;}else if(type==2){if(s!="true"&&s!="false")throw Error("Invalid saved boolean.");v=s=="true";}else throw Error("Unknown saved value type.");}if(app.persistent.count(name)){if(app.state.at(name).index()!=v.index())throw Error("Saved type changed for "+name+". Move the state file aside before changing its type.");app.state[name]=v;}}if(!in.eof())throw Error("Invalid state file: "+pathText(path));}
-void security(httplib::Response& res){res.set_header("X-Content-Type-Options","nosniff");res.set_header("Referrer-Policy","same-origin");res.set_header("Cache-Control","no-store");res.set_header("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: http:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");}
+void security(httplib::Response& res){res.set_header("X-Content-Type-Options","nosniff");res.set_header("Referrer-Policy","same-origin");res.set_header("Cache-Control","no-store");res.set_header("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https:; img-src 'self' https: http: data:; font-src 'self' https: data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");}
 void serve(Engine& app,const fs::path& source,int port){
+    tappy_theme::Theme theme;if(!app.theme.empty())theme.load(app.theme,source);
     load(app,dataPath(source));httplib::Server server;server.new_task_queue=[] { return new httplib::ThreadPool(16,128); };mutex lock;condition_variable changed;atomic<int> streams{0};map<string,Session> sessions;auto started=chrono::steady_clock::now();
     // One source watcher serves all browsers. Browser reload uses a persistent SSE connection.
     string lastSource=readFile(source),liveVersion=token(),lastReadError;
@@ -305,6 +308,7 @@ void serve(Engine& app,const fs::path& source,int port){
         lastSource=next;
         try {
             Engine candidate(parse(next));validate(candidate);
+            auto nextTheme=theme;if(candidate.theme!=app.theme){nextTheme={};if(!candidate.theme.empty())nextTheme.load(candidate.theme,source);}
             for(auto& [name,value]:candidate.state) {
                 auto old=app.state.find(name);
                 if(old!=app.state.end()&&old->second.index()==value.index())value=old->second;
@@ -315,7 +319,7 @@ void serve(Engine& app,const fs::path& source,int port){
             candidate.revision=app.revision+1;
             save(candidate,dataPath(source));
             for(auto& [id,session]:sessions){(void)id;session.actions.clear();}
-            app=std::move(candidate);
+            app=std::move(candidate);theme=std::move(nextTheme);
             liveVersion=token();changed.notify_all();
             cout<<"Reloaded "<<pathText(source.filename())<<" · preserved matching state variables\n"<<flush;
         } catch(const exception& e) {
@@ -327,7 +331,9 @@ void serve(Engine& app,const fs::path& source,int port){
         while(!stop.stop_requested()) {
             this_thread::sleep_for(chrono::milliseconds(250));
             error_code error;auto time=fs::last_write_time(source,error);if(error)continue;
-            auto size=fs::file_size(source,error);if(error||(time==watchedTime&&size==watchedSize))continue;
+            auto size=fs::file_size(source,error);if(error)continue;
+            {lock_guard guard(lock);if(!theme.local.empty()){try{if(theme.refresh()){liveVersion=token();changed.notify_all();}}catch(const exception& e){if(lastReadError!=e.what()){lastReadError=e.what();cerr<<"Theme reload failed: "<<e.what()<<'\n';}}}}
+            if(time==watchedTime&&size==watchedSize)continue;
             watchedTime=time;watchedSize=size;lock_guard guard(lock);refreshSource();
         }
     });
@@ -359,6 +365,7 @@ void serve(Engine& app,const fs::path& source,int port){
     server.set_payload_max_length(64*1024);server.set_read_timeout(5,0);server.set_write_timeout(5,0);
     auto getSession=[&](const httplib::Request& req,httplib::Response& res)->Session&{string cookie=req.get_header_value("Cookie"),id;istringstream is(cookie);string bit;while(getline(is,bit,';')){bit=trim(bit);if(bit.rfind("tappy_session=",0)==0)id=bit.substr(14);}if(!sessions.count(id)){if(sessions.size()>=1000)sessions.erase(sessions.begin());id=token();sessions.emplace(id,Session{});res.set_header("Set-Cookie","tappy_session="+id+"; HttpOnly; SameSite=Strict; Path=/");}return sessions.at(id);};
     server.Get("/_tappy/htmx.min.js",[](const auto&,auto& res){res.set_content(string(htmx_js),"text/javascript; charset=utf-8");});
+    server.Get("/_tappy/theme.css",[&](const auto&,auto& res){lock_guard guard(lock);security(res);res.set_content(theme.css,"text/css; charset=utf-8");});
     server.Get("/_tappy/default.css",[](const auto&,auto& res){res.set_content(string(default_css),"text/css; charset=utf-8");});
     server.Post(R"(/_tappy/action/([a-f0-9]+))",[&](const httplib::Request& req,httplib::Response& res){lock_guard guard(lock);security(res);auto& session=getSession(req,res);if(req.get_header_value("X-Tappy-CSRF")!=session.csrf){res.status=403;res.set_content("Invalid form token. Reload the page.","text/plain");return;}auto it=session.actions.find(req.matches[1].str());if(it==session.actions.end()){res.status=409;res.set_header("HX-Refresh","true");res.set_content("This page is stale. Reload it before trying again.","text/plain");return;}Action action=it->second;
         if(action.revision!=app.revision){Renderer renderer{app,session,action.route};res.set_content(renderer.page("The shared data changed. Please try again using this refreshed page."),"text/html; charset=utf-8");return;}
@@ -370,7 +377,7 @@ void serve(Engine& app,const fs::path& source,int port){
             ++app.revision;Renderer renderer{app,session,route};string body=renderer.page();save(app,dataPath(source));session.actions.erase(req.matches[1].str());if(!exec.redirect.empty())res.set_header("HX-Push-Url",route);res.set_content(body,"text/html; charset=utf-8");
         }catch(const exception& e){app.state=backup;app.revision=oldRevision;Renderer renderer{app,session,action.route};res.set_content(renderer.page(e.what()),"text/html; charset=utf-8");}
     });
-    server.Get(R"(/.*)",[&](const httplib::Request& req,httplib::Response& res){lock_guard guard(lock);security(res);if(!app.pages.count(req.path)){res.status=404;res.set_content("Page not found.","text/plain");return;}auto& session=getSession(req,res);if(session.actions.size()>10000)session.actions.clear();try{Renderer renderer{app,session,req.path};string body=renderer.page();if(app.fragments.count(req.path)||(req.get_header_value("HX-Request")=="true"&&req.get_header_value("HX-History-Restore-Request")!="true"))res.set_content(body,"text/html; charset=utf-8");else res.set_content(document(app.pages.at(req.path)->t[1].text,body,"/_tappy/",liveVersion),"text/html; charset=utf-8");}catch(const exception& e){res.status=500;res.set_content(esc(e.what()),"text/plain");}});
+    server.Get(R"(/.*)",[&](const httplib::Request& req,httplib::Response& res){lock_guard guard(lock);security(res);if(!app.pages.count(req.path)){res.status=404;res.set_content("Page not found.","text/plain");return;}auto& session=getSession(req,res);if(session.actions.size()>10000)session.actions.clear();try{Renderer renderer{app,session,req.path};string body=renderer.page();if(app.fragments.count(req.path)||(req.get_header_value("HX-Request")=="true"&&req.get_header_value("HX-History-Restore-Request")!="true"))res.set_content(body,"text/html; charset=utf-8");else res.set_content(document(app.pages.at(req.path)->t[1].text,body,"/_tappy/",liveVersion,!app.theme.empty()),"text/html; charset=utf-8");}catch(const exception& e){res.status=500;res.set_content(esc(e.what()),"text/plain");}});
     cout<<"Tappyweb · C++20 + HTMX\nhttp://127.0.0.1:"<<port<<"\n"<<app.pages.size()<<" pages · shared app state · "<<chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now()-started).count()<<" ms setup\nWatching source for changes. Press Ctrl+C to stop.\n"<<flush;
     if(!server.listen("127.0.0.1",port))throw Error("Cannot listen on port "+to_string(port)+". Try --port with a different number.");
 }
@@ -380,14 +387,15 @@ int tappyMain(int argc,char** argv){try{
         auto helper=tappy_update::helper();if(!fs::exists(helper))throw Error("The update helper is missing. Install the latest package from GitHub.");
         return tappy_update::process({helper,"--force",tappy_update::version});
     }
-    if(argc<2||string(argv[1])=="--help"){cout<<"Tappyweb 0.3 — a small, readable web language\n\n  tappy file.tappy [--port 3000]\n  tappy check file.tappy\n  tappy update\n  tappy serve file.tappy [--port 3000]\n  tappy build file.tappy [--out dist]\n\nbuild exports static pages; use serve for forms and state changes.\n";return 0;}string command=argv[1];if(command=="--version"){cout<<"tappy 0.3.0\n";return 0;}bool direct=utf8Path(command).extension()==".tappy";int sourceIndex=direct?1:2;if(direct)command="serve";if(command!="check"&&command!="serve"&&command!="build")throw Error("Unknown command. Use tappy file.tappy or run tappy --help.");if(argc<=sourceIndex)throw Error("Give a .tappy source file.");fs::path source=fs::absolute(utf8Path(argv[sourceIndex]));filename=pathText(source);int port=3000;fs::path out="dist";
+    if(argc<2||string(argv[1])=="--help"){cout<<"Tappyweb 0.3 — a small, readable web language\n\n  tappy file.tappy [--port 3000]\n  tappy check file.tappy\n  tappy update\n  tappy serve file.tappy [--port 3000]\n  tappy build file.tappy [--out dist]\n\nbuild exports static pages; use serve for forms and state changes.\n";return 0;}string command=argv[1];if(command=="--version"){cout<<"tappy 0.3.1\n";return 0;}bool direct=utf8Path(command).extension()==".tappy";int sourceIndex=direct?1:2;if(direct)command="serve";if(command!="check"&&command!="serve"&&command!="build")throw Error("Unknown command. Use tappy file.tappy or run tappy --help.");if(argc<=sourceIndex)throw Error("Give a .tappy source file.");fs::path source=fs::absolute(utf8Path(argv[sourceIndex]));filename=pathText(source);int port=3000;fs::path out="dist";
     for(int i=sourceIndex+1;i<argc;++i){string opt=argv[i];if(i+1>=argc)throw Error("Missing value after "+opt);string value=argv[++i];if(opt=="--port"&&command=="serve"){if(value.empty()||!all_of(value.begin(),value.end(),[](unsigned char c){return isdigit(c);})||value.size()>5)throw Error("Port must be 1–65535.");port=stoi(value);if(port<1||port>65535)throw Error("Port must be 1–65535.");}else if(opt=="--out"&&command=="build")out=utf8Path(value);else throw Error("Unknown option: "+opt);}
     Engine app(parse(readFile(source)));validate(app);
     if(command=="check"){cout<<"OK · "<<app.pages.size()<<" pages, "<<app.components.size()<<" components, "<<app.state.size()<<" state variables\n";return 0;}
     if(command=="serve"){tappy_update::check_in_background();serve(app,source,port);return 0;}
+    tappy_theme::Theme theme;if(!app.theme.empty())theme.load(app.theme,source);
     // Generate everything first; a dynamic-page error must not leave a partial export.
-    map<fs::path,string> files;Session session;for(auto& [route,node]:app.pages){Renderer renderer{app,session,route,true};string body=renderer.page();fs::path rel=route=="/"?fs::path("index.html"):fs::path(route.substr(1))/"index.html";files[rel]=app.fragments.count(route)?body:document(node->t[1].text,body,"/_tappy/");}
-    fs::create_directories(out/"_tappy");for(auto& [rel,html]:files){fs::create_directories((out/rel).parent_path());writeFile(out/rel,html);}writeFile(out/"_tappy/htmx.min.js",string(htmx_js));writeFile(out/"_tappy/default.css",string(default_css));cout<<"Built "<<files.size()<<" static pages in "<<pathText(fs::absolute(out))<<"\n";return 0;
+    map<fs::path,string> files;Session session;for(auto& [route,node]:app.pages){Renderer renderer{app,session,route,true};string body=renderer.page();fs::path rel=route=="/"?fs::path("index.html"):fs::path(route.substr(1))/"index.html";files[rel]=app.fragments.count(route)?body:document(node->t[1].text,body,"/_tappy/","",!app.theme.empty());}
+    fs::create_directories(out/"_tappy");for(auto& [rel,html]:files){fs::create_directories((out/rel).parent_path());writeFile(out/rel,html);}writeFile(out/"_tappy/htmx.min.js",string(htmx_js));writeFile(out/"_tappy/default.css",string(default_css));if(!app.theme.empty())writeFile(out/"_tappy/theme.css",theme.css);cout<<"Built "<<files.size()<<" static pages in "<<pathText(fs::absolute(out))<<"\n";return 0;
 }catch(const exception& e){cerr<<e.what()<<'\n';return 1;}}
 
 #ifdef _WIN32

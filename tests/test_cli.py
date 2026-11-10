@@ -192,6 +192,36 @@ set details to new page with name "Details":
         bad = self.source(path.read_text()+'\nset home to 2\n')
         self.assertNotEqual(self.cli('check', bad).returncode, 0)
 
+    def test_local_theme_live_reload_and_export(self):
+        css = self.dir/'custom theme.css'
+        css.write_text(':root { --tappy-accent: #ff00aa; }')
+        path = self.source('set theme to "./custom theme.css"\npage "Theme" /\n    heading "Themed"\n')
+        self.start(path)
+        _, _, body = self.page()
+        self.assertLess(body.index('default.css'), body.index('theme.css'))
+        self.assertIn('#ff00aa', self.request('GET', '/_tappy/theme.css')[2])
+        version = re.search(r'data-version="([a-f0-9]+)"', body)[1]
+        css.write_text(':root { --tappy-accent: #00ffaa; }')
+        self.await_reload(version)
+        self.assertIn('#00ffaa', self.request('GET', '/_tappy/theme.css')[2])
+        out = self.dir/'export'
+        result = self.cli('build', path, '--out', out)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('theme.css', (out/'index.html').read_text())
+        self.assertIn('#00ffaa', (out/'_tappy/theme.css').read_text())
+        # Bad replacement CSS keeps the last usable theme.
+        css.write_text('<html>not CSS</html>')
+        time.sleep(.4)
+        self.assertIn('#00ffaa', self.request('GET', '/_tappy/theme.css')[2])
+
+    def test_theme_diagnostics(self):
+        for setting in ['set theme to 12', 'set theme to "http://example.com/theme.css"',
+                        'set theme to "a.css"\nset theme to "b.css"']:
+            path = self.source(setting+'\npage "Home" /\n    text "Test"\n')
+            self.assertNotEqual(self.cli('check', path).returncode, 0)
+        path = self.source('set theme to "./missing.css"\npage "Home" /\n    text "Test"\n')
+        self.assertNotEqual(self.cli('build', path, '--out', self.dir/'missing').returncode, 0)
+
     def test_live_reload_is_push_not_browser_polling(self):
         path = self.source('page "One" /\n    text "Before"\n')
         self.start(path)

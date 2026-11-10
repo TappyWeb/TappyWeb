@@ -19,7 +19,7 @@
 namespace tappy_update {
 namespace fs=std::filesystem;
 inline fs::path utf8(const std::string& text){std::u8string value;for(unsigned char c:text)value+=char8_t(c);return fs::path(value);}
-inline constexpr const char* version="0.3.0";
+inline constexpr const char* version="0.3.1";
 inline std::array<int,3> parts(std::string value) {
     if(!value.empty()&&value[0]=='v')value.erase(0,1);
     std::smatch match;if(!std::regex_match(value,match,std::regex("([0-9]{1,6})\\.([0-9]{1,6})\\.([0-9]{1,6})")))return {-1,-1,-1};

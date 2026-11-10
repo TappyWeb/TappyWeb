@@ -29,6 +29,20 @@ page "My tasks" /
 
 **That is a working task app.** Tappyweb renders the HTML, handles submissions on the server, updates the page through HTMX, and saves the tasks between restarts.
 
+## Make it look like yours
+
+Use a CSS file from your project or a link to a theme someone has shared:
+
+```tappy
+set theme to "./themes/midnight.css"
+```
+
+Studio has **File → New Theme…** for a starting CSS file. Edit it, save it, and the running preview updates. Remote themes are downloaded once at startup and cached, so normal page visits do not keep hitting the theme host. You can share your CSS through any HTTPS host that serves the file directly.
+
+See the [theme guide](docs/themes.md) for the CSS variables, remote links and how to share a theme.
+
+This description has been written with AI.
+
 ## From file to localhost
 
 ```sh

@@ -4,19 +4,19 @@ Unicode true
 !include "WinVer.nsh"
 !include "x64.nsh"
 !define PRODUCT "Tappyweb"
-!define VERSION "0.3.0"
+!define VERSION "0.3.1"
 !define KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\TappywebCLI"
 Name "${PRODUCT} ${VERSION}"
 OutFile "${OUTPUT}"
 InstallDir "$LOCALAPPDATA\Programs\Tappyweb"
 InstallDirRegKey HKCU "${KEY}" "InstallLocation"
-VIProductVersion "0.3.0.0"
+VIProductVersion "0.3.1.0"
 VIAddVersionKey /LANG=1033 "ProductName" "Tappyweb"
 VIAddVersionKey /LANG=1033 "CompanyName" "TappyWeb"
 VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright (c) 2026 TappyWeb"
 VIAddVersionKey /LANG=1033 "FileDescription" "Tappyweb Installer"
-VIAddVersionKey /LANG=1033 "FileVersion" "0.3.0"
-VIAddVersionKey /LANG=1033 "ProductVersion" "0.3.0"
+VIAddVersionKey /LANG=1033 "FileVersion" "0.3.1"
+VIAddVersionKey /LANG=1033 "ProductVersion" "0.3.1"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 ShowInstDetails show

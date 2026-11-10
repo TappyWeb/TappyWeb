@@ -22,11 +22,11 @@ def build_installer(path_helper, makensis='makensis', nsis_dir=None):
     require_windows_x64(path_helper)
     with tempfile.TemporaryDirectory(prefix='tappy-nsis-') as temp:
         payload=Path(temp)/'payload';payload.mkdir()
-        with zipfile.ZipFile(ROOT/'releases/Tappyweb-0.3.0-windows-x64.zip') as archive:archive.extractall(payload)
+        with zipfile.ZipFile(ROOT/'releases/Tappyweb-0.3.1-windows-x64.zip') as archive:archive.extractall(payload)
         shutil.copy2(path_helper,payload/'EnvPath.exe')
         shutil.copy2(ROOT/'assets/installer/AppIcon.ico',payload/'AppIcon.ico')
         for name in ('install.ps1','START-HERE.md'):(payload/name).unlink(missing_ok=True)
-        compile_installer(ROOT,payload,ROOT/'assets/installer/sidebar.bmp',ROOT/'assets/installer/AppIcon.ico',ROOT/'releases/Tappyweb-0.3.0-Windows-x64-Setup.exe',makensis,nsis_dir)
+        compile_installer(ROOT,payload,ROOT/'assets/installer/sidebar.bmp',ROOT/'assets/installer/AppIcon.ico',ROOT/'releases/Tappyweb-0.3.1-Windows-x64-Setup.exe',makensis,nsis_dir)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -39,13 +39,13 @@ def main():
     args = parser.parse_args()
     require_windows_x64(args.binary)
     require_windows_x64(args.updater)
-    output = ROOT / 'releases/Tappyweb-0.3.0-windows-x64.zip'
+    output = ROOT / 'releases/Tappyweb-0.3.1-windows-x64.zip'
     output.parent.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='tappy-windows-') as folder:
         stage = Path(folder)
         shutil.copy2(args.binary, stage / 'tappy.exe')
         shutil.copy2(args.updater,stage/'tappy-update.exe')
-        (stage/'update-enabled').write_text('0.3.0\n')
+        (stage/'update-enabled').write_text('0.3.1\n')
         shutil.copy2(ROOT / 'tools/install_windows.ps1', stage / 'install.ps1')
         shutil.copy2(ROOT / 'docs/windows.md', stage / 'START-HERE.md')
         shutil.copy2(ROOT / 'README.md', stage / 'README.md')

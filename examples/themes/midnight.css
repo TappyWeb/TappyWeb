@@ -1,0 +1,10 @@
+/* Tappyweb Midnight. Change the variables, save, and check your preview. */
+:root {
+    --tappy-background: #141419;
+    --tappy-text: #eeeeef;
+    --tappy-accent: #a78bfa;
+    --tappy-surface: #202027;
+    --tappy-border: #34343c;
+    --tappy-muted: #a6a6b5;
+    --tappy-radius: 12px;
+}

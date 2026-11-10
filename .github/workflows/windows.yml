@@ -21,6 +21,9 @@ jobs:
       - name: Test updater
         shell: pwsh
         run: ./build/windows-x64/Release/tappy-update.exe --self-test
+      - name: Test themes
+        shell: pwsh
+        run: ./build/windows-x64/Release/tappy-theme-tests.exe
       - name: Test PATH helper
         shell: pwsh
         run: ./tools/test_windows_env.ps1 -Helper ./build/windows-x64/Release/tappy-env.exe

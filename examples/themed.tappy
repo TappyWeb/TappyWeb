@@ -1,0 +1,13 @@
+set theme to "./themes/midnight.css"
+set completed to 12
+
+set home to new page with name "Midnight":
+    suffix: /
+    heading "Make it yours."
+    text "This page uses a CSS theme. Open themes/midnight.css and try another accent color."
+    card:
+        subheading "Your theme, your style"
+        text "Cards, inputs, buttons and text share the same theme variables."
+        button "Completed: {completed}":
+            on click:
+                set completed to completed + 1

@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = '0.3.0'
+VERSION = '0.3.1'
 IDENTIFIER = 'dev.tappyweb.cli'
 
 def run(*args):
