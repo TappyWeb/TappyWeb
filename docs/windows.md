@@ -55,7 +55,7 @@ Use the official [LLVM-MinGW toolchain](https://github.com/mstorsjo/llvm-mingw/r
 python3 tools/embed.py
 /path/to/llvm-mingw/bin/x86_64-w64-mingw32-clang++ \
   -std=c++20 -O2 -static -municode -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 \
-  -Ivendor src/main.cpp -lws2_32 -o /tmp/tappy.exe
+  -Ivendor src/main.cpp -lws2_32 -lwinhttp -o /tmp/tappy.exe
 /path/to/llvm-mingw/bin/x86_64-w64-mingw32-clang++ \
   -std=c++20 -O2 -static -Ivendor tools/updater.cpp -lwinhttp -lbcrypt -o /tmp/tappy-update.exe
 python3 tools/package_windows.py --binary /tmp/tappy.exe --updater /tmp/tappy-update.exe \
