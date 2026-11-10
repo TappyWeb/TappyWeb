@@ -17,10 +17,24 @@ def require_windows_x64(path):
     if data[offset:offset+4] != b'PE\0\0' or struct.unpack_from('<H', data, offset+4)[0] != 0x8664:
         raise ValueError(f'Expected a Windows x64 executable: {path}')
 
+def build_installer(path_helper, makensis='makensis', nsis_dir=None):
+    from nsis_builder import compile_installer
+    require_windows_x64(path_helper)
+    with tempfile.TemporaryDirectory(prefix='tappy-nsis-') as temp:
+        payload=Path(temp)/'payload';payload.mkdir()
+        with zipfile.ZipFile(ROOT/'releases/Tappyweb-0.2.0-windows-x64.zip') as archive:archive.extractall(payload)
+        shutil.copy2(path_helper,payload/'EnvPath.exe')
+        shutil.copy2(ROOT/'assets/installer/AppIcon.ico',payload/'AppIcon.ico')
+        for name in ('install.ps1','START-HERE.md'):(payload/name).unlink(missing_ok=True)
+        compile_installer(ROOT,payload,ROOT/'assets/installer/sidebar.bmp',ROOT/'assets/installer/AppIcon.ico',ROOT/'releases/Tappyweb-0.2.0-Windows-x64-Setup.exe',makensis,nsis_dir)
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--toolchain-license', type=Path)
+    parser.add_argument('--path-helper', type=Path, help='Also build the NSIS installer')
+    parser.add_argument('--makensis', default='makensis')
+    parser.add_argument('--nsis-dir', type=Path)
     args = parser.parse_args()
     require_windows_x64(args.binary)
     output = ROOT / 'releases/Tappyweb-0.2.0-windows-x64.zip'
@@ -41,6 +55,8 @@ def main():
             for path in sorted(stage.rglob('*')):
                 if path.is_file(): archive.write(path, path.relative_to(stage))
     print(output)
+    if args.path_helper:
+        build_installer(args.path_helper, args.makensis, args.nsis_dir)
 
 if __name__ == '__main__':
     main()
