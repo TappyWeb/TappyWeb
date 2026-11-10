@@ -55,7 +55,7 @@ FunctionEnd
 Section "Tappyweb language" MainSection
   SectionIn RO
   SetOutPath "$INSTDIR"
-  File /r "${PAYLOAD}/*"
+  File /r "${PAYLOAD_FILES}"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   WriteRegStr HKCU "${KEY}" "DisplayName" "Tappyweb"
   WriteRegStr HKCU "${KEY}" "DisplayVersion" "${VERSION}"
