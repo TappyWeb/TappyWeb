@@ -1,5 +1,5 @@
 name: Windows CLI
-on: [push, pull_request, workflow_dispatch]
+on: [push, pull_request, workflow_dispatch, workflow_call]
 env:
   TAPPY_NO_UPDATE: '1'
 permissions:

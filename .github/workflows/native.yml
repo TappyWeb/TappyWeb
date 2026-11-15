@@ -1,5 +1,5 @@
 name: Native C++
-on: [push, pull_request, workflow_dispatch]
+on: [push, pull_request, workflow_dispatch, workflow_call]
 permissions:
   contents: read
 env:
@@ -8,7 +8,7 @@ jobs:
   build-and-test:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-22.04, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -23,11 +23,33 @@ jobs:
         run: python tests/test_cli.py
       - name: Test themes and updater
         run: ./build/native/tappy-theme-tests && ./build/native/tappy-update --self-test
+      - name: Install Linux packaging tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y dpkg-dev desktop-file-utils shared-mime-info
+      - name: Build Linux packages
+        if: runner.os == 'Linux'
+        run: ./build/native/tappy-package linux --binary build/native/tappy --updater build/native/tappy-update
+      - name: Test Linux packages and file association
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          mkdir -p build/portable
+          tar -xzf releases/*linux-*.tar.gz -C build/portable
+          test "$(TAPPY_NO_UPDATE=1 build/portable/tappy --version)" = 'tappy 0.4.1'
+          TAPPY_PREFIX="$PWD/build/user-install" build/portable/install.sh
+          build/user-install/bin/tappy check examples/python.tappy
+          sudo apt-get install -y ./releases/*linux-*.deb
+          test "$(tappy --version)" = 'tappy 0.4.1'
+          tappy check examples/python.tappy
+          desktop-file-validate /usr/share/applications/tappyweb.desktop
+          test "$(xdg-mime query filetype examples/python.tappy)" = 'text/x-tappy'
+          sudo apt-get remove -y tappyweb
+          test ! -e /usr/bin/tappy
       - name: Build Mac installers
         if: runner.os == 'macOS'
         run: ./build/native/tappy-package macos
       - uses: actions/upload-artifact@v4
-        if: runner.os == 'macOS'
         with:
-          name: language-macos-universal
-          path: releases/*0.4.0*
+          name: language-${{ matrix.os }}
+          path: releases/*0.4.1*
+          if-no-files-found: error

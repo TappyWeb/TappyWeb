@@ -1,0 +1,30 @@
+name: Publish tested release
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    uses: ./.github/workflows/native.yml
+  windows:
+    uses: ./.github/workflows/windows.yml
+  publish:
+    needs: [native, windows]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Verify artifacts and publish 0.4.1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          cd release-assets
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 8
+          sha256sum Tappyweb-* > SHA256SUMS.txt
+          gh release create v0.4.1 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'Tappyweb 0.4.1 — Linux downloads' --notes-file ../docs/release-0.4.1.md --latest Tappyweb-* SHA256SUMS.txt

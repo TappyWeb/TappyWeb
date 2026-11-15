@@ -94,7 +94,59 @@ exit 0
     auto output=root/"releases"/("Tappyweb-"+version+"-macOS-universal.pkg");run({"pkgbuild","--root",text(payload),"--identifier","dev.tappyweb.cli","--version",version,"--install-location","/","--ownership","recommended","--scripts",text(scripts),text(output)});cout<<output<<'\n';
 #endif
 }
-int packageMain(int argc,char** argv){try{if(argc<2){cout<<"tappy-package macos|windows [--root path] [--binary file --updater file --path-helper file --makensis file --nsis-dir path --toolchain-license file]\n";return 0;}string mode=argv[1];map<string,string> options;for(int i=2;i<argc;i+=2){if(i+1>=argc||string(argv[i]).rfind("--",0)!=0)throw runtime_error("Expected --option value");string key=string(argv[i]).substr(2),value=argv[i+1];if(key!="makensis"||tappy_update::utf8(value).has_parent_path())value=text(fs::absolute(tappy_update::utf8(value)));options[key]=value;}auto root=options.count("root")?tappy_update::utf8(options.at("root")):fs::current_path();fs::current_path(root);fs::create_directories(root/"releases");if(mode=="macos")macos(root);else if(mode=="windows")windows(root,options);else throw runtime_error("Use macos or windows.");return 0;}catch(const exception& error){cerr<<error.what()<<'\n';return 1;}}
+void linuxPackage(const fs::path& root,const map<string,string>& options){
+#ifndef __linux__
+    (void)root;(void)options;throw runtime_error("Linux packages must be built on Linux.");
+#else
+#if defined(__aarch64__)
+    const string arch="arm64",debArch="arm64";
+#elif defined(__x86_64__)
+    const string arch="x64",debArch="amd64";
+#else
+#error Unsupported Linux architecture
+#endif
+    auto option=[&](const string& name){auto it=options.find(name);if(it==options.end())throw runtime_error("Missing --"+name);return tappy_update::utf8(it->second);};
+    Temporary temp;auto portable=temp.path/"portable";fs::create_directory(portable);
+    for(auto name:{"binary","updater"}){auto file=portable/(string(name)=="binary"?"tappy":"tappy-update");copyFile(option(name),file);executable(file);}
+    write(portable/"update-enabled",version+"\n");copyFile(root/"README.md",portable/"README.md");copyFile(root/"LICENSE",portable/"LICENSE");licenses(root,portable/"licenses");
+    for(auto name:{"docs","examples"})copyTree(root/name,portable/name);
+    write(portable/"install.sh",R"SH(#!/bin/sh
+set -eu
+SOURCE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PREFIX="${TAPPY_PREFIX:-$HOME/.local}"
+mkdir -p "$PREFIX/lib/tappyweb" "$PREFIX/bin"
+cp -R "$SOURCE/." "$PREFIX/lib/tappyweb/"
+ln -sf "$PREFIX/lib/tappyweb/tappy" "$PREFIX/bin/tappy"
+printf 'Installed Tappyweb. Add %s/bin to PATH if needed.\n' "$PREFIX"
+)SH");executable(portable/"install.sh");
+    auto output=root/"releases"/("Tappyweb-"+version+"-linux-"+arch+".tar.gz");run({"tar","-czf",text(output),"-C",text(portable),"."});cout<<output<<'\n';
+    auto payload=temp.path/"deb",runtime=payload/"usr/lib/tappyweb";copyTree(portable,runtime);fs::remove(runtime/"install.sh");fs::create_directories(payload/"usr/bin");fs::create_symlink("../lib/tappyweb/tappy",payload/"usr/bin/tappy");
+    write(payload/"usr/share/applications/tappyweb.desktop",R"DESKTOP([Desktop Entry]
+Type=Application
+Name=Tappyweb
+Comment=Run a Tappy web app
+Exec=tappy %f
+Terminal=true
+Icon=tappyweb
+MimeType=text/x-tappy;
+Categories=Development;WebDevelopment;
+NoDisplay=true
+)DESKTOP");
+    write(payload/"usr/share/mime/packages/tappyweb.xml",R"XML(<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info"><mime-type type="text/x-tappy"><comment>Tappyweb source</comment><sub-class-of type="text/plain"/><glob pattern="*.tappy"/></mime-type></mime-info>
+)XML");copyFile(root/"assets/logo.png",payload/"usr/share/icons/hicolor/256x256/apps/tappyweb.png");
+    // Debian derives the actual glibc/libstdc++ requirements from the built binary.
+    write(payload/"debian/control","Source: tappyweb\nSection: devel\nPriority: optional\nMaintainer: TappyWeb contributors <noreply@tappyweb.dev>\n\nPackage: tappyweb\nArchitecture: "+debArch+"\nDescription: Readable web language with a C++ runtime and HTMX\n");
+    auto before=fs::current_path();fs::current_path(payload);run({"dpkg-shlibdeps","-e"+text(runtime/"tappy"),"-e"+text(runtime/"tappy-update"),"-T"+text(temp.path/"substvars")});fs::current_path(before);
+    // dpkg-shlibdeps needs debian/control in its working directory.
+    ifstream dependencies(temp.path/"substvars");string line,depends;while(getline(dependencies,line))if(line.rfind("shlibs:Depends=",0)==0)depends=line.substr(15);
+    if(depends.empty())throw runtime_error("Cannot determine Linux runtime dependencies");
+    write(payload/"DEBIAN/control","Package: tappyweb\nVersion: "+version+"\nSection: devel\nPriority: optional\nArchitecture: "+debArch+"\nMaintainer: TappyWeb contributors <noreply@tappyweb.dev>\nDepends: "+depends+", curl, ca-certificates, tar, coreutils\nRecommends: shared-mime-info, desktop-file-utils\nDescription: Readable web language with a C++ runtime and HTMX\n");
+    for(auto name:{"postinst","postrm"}){write(payload/"DEBIAN"/name,"#!/bin/sh\nset -e\nif command -v update-mime-database >/dev/null; then update-mime-database /usr/share/mime; fi\nif command -v update-desktop-database >/dev/null; then update-desktop-database /usr/share/applications; fi\n");executable(payload/"DEBIAN"/name);}
+    fs::remove_all(payload/"debian");auto deb=root/"releases"/("Tappyweb-"+version+"-linux-"+arch+".deb");run({"dpkg-deb","--root-owner-group","--build",text(payload),text(deb)});cout<<deb<<'\n';
+#endif
+}
+int packageMain(int argc,char** argv){try{if(argc<2){cout<<"tappy-package macos|windows|linux [--root path] [--binary file --updater file --path-helper file --makensis file --nsis-dir path --toolchain-license file]\n";return 0;}string mode=argv[1];map<string,string> options;for(int i=2;i<argc;i+=2){if(i+1>=argc||string(argv[i]).rfind("--",0)!=0)throw runtime_error("Expected --option value");string key=string(argv[i]).substr(2),value=argv[i+1];if(key!="makensis"||tappy_update::utf8(value).has_parent_path())value=text(fs::absolute(tappy_update::utf8(value)));options[key]=value;}auto root=options.count("root")?tappy_update::utf8(options.at("root")):fs::current_path();fs::current_path(root);fs::create_directories(root/"releases");if(mode=="macos")macos(root);else if(mode=="windows")windows(root,options);else if(mode=="linux")linuxPackage(root,options);else throw runtime_error("Use macos, windows or linux.");return 0;}catch(const exception& error){cerr<<error.what()<<'\n';return 1;}}
 #ifdef _WIN32
 int wmain(int argc,wchar_t** wide){vector<string> values;vector<char*> args;for(int i=0;i<argc;++i){int size=WideCharToMultiByte(CP_UTF8,0,wide[i],-1,nullptr,0,nullptr,nullptr);string value(size_t(size),0);WideCharToMultiByte(CP_UTF8,0,wide[i],-1,value.data(),size,nullptr,nullptr);value.pop_back();values.push_back(std::move(value));}for(auto& value:values)args.push_back(value.data());return packageMain(argc,args.data());}
 #else

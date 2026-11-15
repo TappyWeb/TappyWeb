@@ -49,7 +49,9 @@ Get the [latest release](https://github.com/TappyWeb/TappyWeb/releases/latest):
 | --- | --- | --- |
 | macOS 13+, Apple Silicon and Intel | Universal `.pkg` | Portable `.zip` |
 | Windows 10/11, x64 | NSIS `Setup.exe` | Portable `.zip` |
-| Linux | Build from source below | — |
+| Linux x64 / ARM64 | Debian / Ubuntu `.deb` | Portable `.tar.gz` |
+
+See the [Linux guide](docs/linux.md) for CPU and library requirements and portable installation.
 
 Installers add the `tappy` command and a `.tappy` file launcher. Existing OS default-app choices may take precedence. Releases are currently unsigned; Mac packages are not notarized.
 

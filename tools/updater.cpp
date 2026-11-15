@@ -45,15 +45,35 @@ string psquote(const fs::path& path){auto raw=path.u8string();string value(reint
 void extract(const fs::path& archive,const fs::path& stage){string command="Expand-Archive -LiteralPath "+psquote(archive)+" -DestinationPath "+psquote(stage)+" -Force";wchar_t system[32768];if(!GetSystemDirectoryW(system,32768))throw runtime_error("System folder unavailable");if(tappy_update::process({fs::path(system)/L"WindowsPowerShell/v1.0/powershell.exe","-NoProfile","-NonInteractive","-Command",tappy_update::utf8(command)})!=0)throw runtime_error("Cannot unpack update");}
 #else
 void download(const string& url,const fs::path& output,size_t limit){if(tappy_update::process({"/usr/bin/curl","--fail","--location","--silent","--show-error","--proto","=https","--proto-redir","=https","--connect-timeout","5","--max-time","25","--max-filesize",to_string(limit),"--output",output,url})!=0)throw runtime_error("GitHub could not be reached");if(fs::file_size(output)>limit)throw runtime_error("Update archive is too large");}
-string sha256(const fs::path& path){auto result=path;result+=".sha";pid_t pid=fork();if(pid==0){int out=open(result.c_str(),O_WRONLY|O_CREAT|O_TRUNC,0600);if(out<0)_exit(1);dup2(out,1);close(out);execl("/usr/bin/shasum","shasum","-a","256",path.c_str(),nullptr);_exit(1);}int status=0;waitpid(pid,&status,0);if(!WIFEXITED(status)||WEXITSTATUS(status))throw runtime_error("Cannot hash update archive");string digest=read(result).substr(0,64);fs::remove(result);return digest;}
+string sha256(const fs::path& path){auto result=path;result+=".sha";pid_t pid=fork();if(pid==0){int out=open(result.c_str(),O_WRONLY|O_CREAT|O_TRUNC,0600);if(out<0)_exit(1);dup2(out,1);close(out);
+#ifdef __APPLE__
+execl("/usr/bin/shasum","shasum","-a","256",path.c_str(),nullptr);
+#else
+execl("/usr/bin/sha256sum","sha256sum",path.c_str(),nullptr);
+#endif
+_exit(1);}int status=0;waitpid(pid,&status,0);if(!WIFEXITED(status)||WEXITSTATUS(status))throw runtime_error("Cannot hash update archive");string digest=read(result).substr(0,64);fs::remove(result);return digest;}
 void atomic_write(const fs::path& path,const string& text){auto temp=path;temp+=".tmp";{ofstream file(temp);file<<text;if(!file)throw runtime_error("Cannot write update pointer");}fs::rename(temp,path);}
-void extract(const fs::path& archive,const fs::path& stage){if(tappy_update::process({"/usr/bin/ditto","-x","-k",archive,stage})!=0)throw runtime_error("Cannot unpack update");}
+void extract(const fs::path& archive,const fs::path& stage){
+#ifdef __APPLE__
+    auto args=vector<fs::path>{"/usr/bin/ditto","-x","-k",archive,stage};
+#else
+    auto args=vector<fs::path>{"/usr/bin/tar","-xzf",archive,"-C",stage,"--no-same-owner"};
+#endif
+    if(tappy_update::process(args)!=0)throw runtime_error("Cannot unpack update");
+}
 #endif
 string asset_name(const string& version){
 #ifdef _WIN32
     return "Tappyweb-"+version+"-windows-x64.zip";
-#else
+#elif defined(__APPLE__)
     return "Tappyweb-"+version+"-macOS-universal.zip";
+#elif defined(__aarch64__)
+    return "Tappyweb-"+version+"-linux-arm64.tar.gz";
+#elif defined(__x86_64__)
+    return "Tappyweb-"+version+"-linux-x64.tar.gz";
+#else
+#error Unsupported updater architecture
+
 #endif
 }
 json select_asset(const json& release,const string& version){

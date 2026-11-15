@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Tappyweb VERSION 0.4.0 LANGUAGES CXX)
+project(Tappyweb VERSION 0.4.1 LANGUAGES CXX)
 find_package(Threads REQUIRED)
 add_executable(tappy-embed tools/embed.cpp)
 target_compile_features(tappy-embed PRIVATE cxx_std_17)
