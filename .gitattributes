@@ -1,0 +1,14 @@
+# Maintained C++ sources, including header implementations.
+src/*.cpp linguist-language=C++
+src/*.hpp linguist-language=C++
+tools/*.cpp linguist-language=C++
+
+# Generated assets and third-party dependencies are not project source.
+src/assets.hpp linguist-generated=true
+vendor/** linguist-vendored=true
+assets/htmx.min.js linguist-vendored=true
+
+# Examples document Tappy; test harnesses are not the language implementation.
+examples/** linguist-documentation=true
+tests/** linguist-detectable=false
+tools/test_*.ps1 linguist-detectable=false
