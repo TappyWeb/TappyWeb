@@ -22,7 +22,7 @@
 Tappyweb puts pages, forms, components and state in a `.tappy` file. The **C++20 runtime** renders the HTML and handles actions on the server; HTMX updates the page. You can add Python to an event when you need a Python library or calculation.
 
 ```tappy
-set completed to 12
+set completed to 16
 
 set home to new page with name "Home":
     suffix: /
