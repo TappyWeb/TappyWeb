@@ -46,8 +46,8 @@ This description has been written with AI.
 ## From file to localhost
 
 ```sh
-git clone https://github.com/TappyWeb/tappy-web.git
-cd tappy-web
+git clone https://github.com/TappyWeb/TappyWeb.git
+cd TappyWeb
 make
 ./bin/tappy examples/tasks.tappy
 ```
