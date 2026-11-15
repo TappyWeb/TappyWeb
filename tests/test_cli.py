@@ -1,4 +1,4 @@
-"""Integration checks against the real C++ binary and HTTP runtime; no test dependencies."""
+"""Integration checks against the real native binary and HTTP runtime; no test dependencies."""
 import html
 import http.client
 import os
@@ -9,10 +9,11 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 import urllib.parse
 
 ROOT = Path(__file__).resolve().parent.parent
-BIN = Path(os.environ.get('TAPPY_TEST_BINARY', str(ROOT / 'bin/tappy')))
+BIN = Path(os.environ.get('TAPPY_TEST_BINARY', str(ROOT / 'bin' / ('tappy.exe' if os.name == 'nt' else 'tappy'))))
 
 class LanguageTests(unittest.TestCase):
     def setUp(self):
@@ -77,6 +78,158 @@ class LanguageTests(unittest.TestCase):
         for path in (ROOT / 'examples').glob('*.tappy'):
             r = self.cli('check', path)
             self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_python_inline_inputs_state_and_following_actions(self):
+        path = self.source('''set count to 0
+set greeting to "Ready"
+set ready to false
+save names as []
+page "Python" /
+    text greeting
+    text count
+    text ready
+    form:
+        input "Name" as name required
+        button "Run"
+        on submit:
+            python:
+                import math
+                # Preserve f-strings, dictionaries, single quotes and two-space Python indentation.
+                if name:
+                  greeting = f"Hello, { {'name': name.strip().title()}['name'] }!"
+                count += math.sqrt(9)
+                ready = True
+                names.append(name)
+                helper = "not a Tappy global"
+            set count to count + 1
+    for each person in names:
+        text person
+''')
+        self.start(path)
+        cookie, csrf, body = self.page()
+        status, _, body = self.post(cookie, csrf, self.action(body), name='<alice>')
+        self.assertEqual(status, 200)
+        self.assertIn('Hello, &lt;Alice&gt;!', body)
+        self.assertIn('<p>4</p>', body)
+        self.assertIn('<p>true</p>', body)
+        self.assertIn('&lt;alice&gt;', body)
+        self.assertNotIn('not a Tappy global', body)
+
+    def test_python_external_script_relative_import_and_reload(self):
+        scripts = self.dir / 'scripts with spaces'
+        scripts.mkdir()
+        (self.dir / 'helper.py').write_text('def greet(name):\n    return "Hi " + name\n')
+        script = scripts / 'greet.py'
+        script.write_text('from helper import greet\ngreeting = greet(name)\n')
+        path = self.source('''set greeting to "Ready"
+page "Python" /
+    text greeting
+    form:
+        input "Name" as name
+        button "Run"
+        on submit:
+            python "scripts with spaces/greet.py"
+''')
+        self.start(path)
+        cookie, csrf, body = self.page()
+        _, _, body = self.post(cookie, csrf, self.action(body), name='Alice')
+        self.assertIn('Hi Alice', body)
+        script.write_text('greeting = "Changed " + name\n')
+        _, _, body = self.post(cookie, csrf, self.action(body), name='Bob')
+        self.assertIn('Changed Bob', body)
+
+    def test_python_check_compiles_without_executing(self):
+        (self.dir/'bad.py').write_text('if True\n    pass\n')
+        base = 'set count to 0\npage "Python" /\n    button "Run":\n        on click:\n'
+        path = self.source(base + '            python:\n                raise RuntimeError("must not execute")\n')
+        result = self.cli('check', path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for suffix in ['            python:\n                if True\n                    pass\n',
+                       '            python "bad.py"\n']:
+            result = self.cli('check', self.source(base + suffix))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('SyntaxError', result.stderr)
+        result = self.cli('check', self.source(base + '            python:\n'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('indented Python', result.stderr)
+
+    def test_python_failure_rolls_back_state(self):
+        for code, message in [('count = 9\nraise ValueError("oops")', 'oops'),
+                              ('count = "wrong"', 'same type'),
+                              ('count = True', 'same type'),
+                              ('items.append(42)', '10,000 strings'),
+                              ('count = float("inf")', 'finite')]:
+            path = self.source('set count to 0\nset items to []\npage "Python" /\n    text count\n'
+                               '    text items.count\n    button "Run":\n        on click:\n'
+                               '            set count to 1\n            python:\n' +
+                               ''.join('                ' + line + '\n' for line in code.splitlines()))
+            self.start(path)
+            cookie, csrf, body = self.page()
+            _, _, body = self.post(cookie, csrf, self.action(body))
+            self.assertIn(message, body)
+            self.assertEqual(body.count('<p>0</p>'), 2)
+            self.server.terminate(); self.server.wait(timeout=5); self.server.stdout.close(); self.server = None
+
+    def test_apps_without_python_do_not_need_interpreter(self):
+        path = self.dir/'ordinary.tappy'
+        path.write_text('set count to 0\npage "No Python" /\n    text count\n')
+        with patch.dict(os.environ, TAPPY_PYTHON=str(self.dir/'missing-python')):
+            result = self.cli('check', path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_python_timeout(self):
+        path = self.source('set count to 0\npage "Python" /\n    text count\n'
+                           '    button "Run":\n        on click:\n            python:\n'
+                           '                while True:\n                    pass\n')
+        self.start(path)
+        cookie, csrf, body = self.page()
+        # The bridge deadline is longer than the normal HTTP test timeout.
+        conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=15)
+        conn.request('POST', self.action(body), '', {'Cookie': cookie, 'X-Tappy-CSRF': csrf,
+                     'Content-Type': 'application/x-www-form-urlencoded'})
+        response = conn.getresponse()
+        body = response.read().decode()
+        conn.close()
+        self.assertEqual(response.status, 200)
+        self.assertIn('10 second time limit', body)
+        self.assertIn('<p>0</p>', body)
+
+    def test_python_tabs_unicode_and_source_lines(self):
+        folder = self.dir / 'Python café'
+        folder.mkdir()
+        path = folder / 'app.tappy'
+        path.write_text('set greeting to "Ready"\npage "Python" /\n\ttext greeting\n'
+                        '\tbutton "Run":\n\t\ton click:\n\t\t\tpython:\n'
+                        '\t\t\t\tgreeting = "Здравей"\n\t\t\t\tprint(greeting)\n', encoding='utf-8')
+        self.start(path)
+        cookie, csrf, body = self.page()
+        _, _, body = self.post(cookie, csrf, self.action(body))
+        self.assertIn('Здравей', body)
+        result = self.cli('check', self.source('page "Python" /\n    button "Run":\n'
+                          '        on click:\n            python:\n                x = (\n'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('line 5', result.stderr)
+
+    def test_python_project_venv_and_missing_interpreter(self):
+        import sys
+        # A real environment verifies interpreter selection without needing third-party packages.
+        subprocess.run([sys.executable, '-m', 'venv', '--without-pip', str(self.dir/'.venv')], check=True,
+                       capture_output=True)
+        path = self.source('set count to 0\npage "Python" /\n    text count\n'
+                           '    button "Run":\n        on click:\n            python:\n'
+                           '                import sys\n'
+                           '                assert sys.prefix.endswith(".venv")\n'
+                           '                count += 1\n')
+        with patch.dict(os.environ):
+            os.environ.pop('TAPPY_PYTHON', None)
+            self.start(path)
+        cookie, csrf, body = self.page()
+        _, _, body = self.post(cookie, csrf, self.action(body))
+        self.assertIn('<p>1</p>', body)
+        with patch.dict(os.environ, TAPPY_PYTHON=str(self.dir/'missing-python')):
+            result = self.cli('check', path)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('TAPPY_PYTHON', result.stderr)
     def test_diagnostics_and_dormant_branches(self):
         cases = [
             ('page "Home" /\n  text "x"', 'four spaces'),
@@ -424,6 +577,38 @@ page "Math" /
         self.server.terminate(); self.server.wait(timeout=5); self.server.stdout.close(); self.server = None
         self.start(path)
         self.assertIn('Count 2', self.page()[2])
+
+    def test_cpp_saved_state_format_compatibility(self):
+        path = self.source('save greeting as "Default"\nsave count as 0\nsave ready as false\n'
+                           'save names as []\npage "Migration" /\n    text greeting\n    text count\n'
+                           '    text ready\n    for each person in names:\n        text person\n'
+                           '    button "Increment":\n        on click:\n            set count to count + 1\n')
+        data = self.dir / '.tappy-data'
+        data.mkdir()
+        # std::quoted uses literal newlines and escapes quotes/backslashes, unlike JSON.
+        (data / 'app.tappy.state').write_text(
+            'TAPPY_STATE_1\n"greeting" 0 "Hello \\"Tappy\\"\nSecond line"\n'
+            '"count" 1 "41"\n"ready" 2 "true"\n"names" 3 2 "Alice" "C:\\\\Users"\n',
+            encoding='utf-8', newline='')
+        self.start(path)
+        cookie, csrf, body = self.page()
+        self.assertIn('Hello &quot;Tappy&quot;\nSecond line', body)
+        self.assertIn('<p>41</p>', body)
+        self.assertIn('<p>true</p>', body)
+        self.assertIn('C:\\Users', body)
+        self.assertIn('<p>42</p>', self.post(cookie, csrf, self.action(body))[2])
+
+    def test_persistence_failure_rolls_back_action(self):
+        path = self.source('save count as 0\npage "Rollback" /\n    text count\n'
+                           '    button "Increment":\n        on click:\n            set count to count + 1\n')
+        self.start(path)
+        cookie, csrf, body = self.page()
+        (self.dir / '.tappy-data').write_text('Cannot create a directory here')
+        status, _, body = self.post(cookie, csrf, self.action(body))
+        self.assertEqual(status, 200)
+        self.assertIn('role="alert"', body)
+        self.assertIn('<p>0</p>', body)
+        self.assertIn('<p>0</p>', self.page()[2])
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

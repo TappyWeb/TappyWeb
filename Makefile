@@ -3,10 +3,14 @@ CXXFLAGS = -std=c++20 -O2 -Wall -Wextra -Wpedantic -pthread
 
 all: bin/tappy bin/tappy-update
 
-src/assets.hpp: assets/htmx.min.js assets/default.css tools/embed.py
-	python3 tools/embed.py
+bin/tappy-embed: tools/embed.cpp
+	@mkdir -p bin
+	$(CXX) -std=c++17 -O2 tools/embed.cpp -o $@
 
-bin/tappy: src/main.cpp src/assets.hpp src/update_support.hpp src/themes.hpp vendor/httplib.h
+src/assets.hpp: assets/htmx.min.js assets/default.css bin/tappy-embed
+	./bin/tappy-embed .
+
+bin/tappy: src/main.cpp src/assets.hpp src/update_support.hpp src/themes.hpp src/python.hpp vendor/httplib.h vendor/json.hpp
 	@mkdir -p bin
 	$(CXX) $(CXXFLAGS) -Ivendor src/main.cpp -o $@
 
@@ -19,8 +23,8 @@ run: bin/tappy
 
 .PHONY: all test run
 
-pkg: src/assets.hpp
-	python3 tools/package_macos.py
+pkg: src/assets.hpp bin/tappy-package
+	./bin/tappy-package macos
 
 .PHONY: pkg
 
@@ -31,3 +35,7 @@ bin/tappy-update: tools/updater.cpp src/update_support.hpp vendor/json.hpp
 bin/tappy-theme-tests: tests/themes.cpp src/themes.hpp src/update_support.hpp
 	@mkdir -p bin
 	$(CXX) $(CXXFLAGS) tests/themes.cpp -o $@
+
+bin/tappy-package: tools/package.cpp src/update_support.hpp
+	@mkdir -p bin
+	$(CXX) $(CXXFLAGS) tools/package.cpp -o $@

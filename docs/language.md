@@ -1,4 +1,4 @@
-# Language reference · MVP 0.3
+# Language reference · MVP 0.4
 
 ## Named pages and reusable routes
 
@@ -228,3 +228,21 @@ Installed runtime packages check the public `TappyWeb/TappyWeb` GitHub release a
 Run `tappy update` to check immediately. Set `TAPPY_NO_UPDATE=1` to disable both automatic checks and forwarding to a cached newer version. Check/build commands do not initiate network checks. Studio has no separate automatic updater or GitHub login.
 
 The language installer registers `.tappy` sources to launch in Terminal on macOS or Command Prompt on Windows. OS-level default-app preferences can retain an existing association; choose Tappyweb in Open With if the OS preserves an earlier selection.
+
+## Python events
+
+Use `python:` inside `on click:` or `on submit:`. Indent Python one level inside the block. Use normal Python syntax, including single quotes, f-strings, comments and imports. Tappy state and form inputs are available by name.
+
+```tappy
+set count to 0
+set home to new page with name "Python":
+    suffix: /
+    heading "{count}"
+    button "Add three":
+        on click:
+            python:
+                import math
+                count += math.sqrt(9)
+```
+
+Use `python "./helper.py"` to run a file instead. Install Python 3.10+ or create an app-local `.venv`. Set `TAPPY_PYTHON` to choose a specific interpreter. The runtime and integration remain C++. See [python.md](python.md) for limits and error handling.

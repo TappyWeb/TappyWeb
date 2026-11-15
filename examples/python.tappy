@@ -1,0 +1,21 @@
+set greeting to "Run Python from your form."
+save names as []
+
+page "Python made easy" /
+    heading "Python + Tappyweb"
+    text greeting
+    form:
+        input "Your name" as name required
+        button "Say hello"
+        on submit:
+            python:
+                # Inputs and state are ordinary Python variables.
+                from datetime import date
+
+                cleaned = name.strip().title()
+                greeting = f"Hello, {cleaned}! Today is {date.today()}."
+                if cleaned not in names:
+                    names.append(cleaned)
+
+    for each person in names:
+        text person

@@ -20,7 +20,7 @@ using namespace std;
 namespace fs = std::filesystem;
 struct Error : runtime_error { using runtime_error::runtime_error; };
 struct Token { string text; bool quoted=false; };
-struct Node { int line=0; vector<Token> t; vector<Node> children; };
+struct Node { int line=0; vector<Token> t; vector<Node> children; string python{}; };
 string filename;
 [[noreturn]] void fail(int line, const string& s) { throw Error(filename+":"+to_string(line)+": "+s); }
 string trim(string s) { auto a=s.find_first_not_of(" \r\n\t"); return a==string::npos?"":s.substr(a,s.find_last_not_of(" \r\n\t")-a+1); }
@@ -41,15 +41,28 @@ vector<Token> lex(string s,int line) {
 }
 vector<Node> parse(const string& source) {
     struct Line{int indent;Node node;}; vector<Line> lines; istringstream in(source); string s; int n=0;
+    int pythonIndent=-1;
     while(getline(in,s)) {
         ++n;size_t i=0,columns=0;
         while(i<s.size()&&(s[i]==' '||s[i]=='\t')){columns+=s[i]=='\t'?4-columns%4:1;++i;}
+        if(pythonIndent>=0) {
+            if(i==s.size()||s[i]=='\r'){lines.back().node.python+='\n';continue;}
+            if(int(columns)>pythonIndent) {
+                // Strip only the Tappy block prefix; Python owns all remaining whitespace and syntax.
+                if(columns<size_t(pythonIndent+4))fail(n,"Indent Python code one level inside python:.");
+                size_t prefix=0,width=0;while(prefix<s.size()&&width<size_t(pythonIndent+4)) {width+=s[prefix]=='\t'?4-width%4:1;++prefix;}
+                if(width!=size_t(pythonIndent+4))fail(n,"Indent Python code one level inside python:.");
+                lines.back().node.python+=s.substr(prefix)+"\n";continue;
+            }
+            pythonIndent=-1;
+        }
         auto t=lex(s.substr(i),n);if(t.empty())continue;
         if(columns%4)fail(n,"Indent with four spaces or one tab per level.");
         if(!t.back().quoted&&t.back().text==":")t.pop_back();
         if(t.empty())fail(n,"Expected a command before ':'.");
         if(t[0].text=="navigation"&&(t.size()==1||(t.size()==2&&t[1].text=="bar")))t={{"nav",false}};
         lines.push_back({int(columns/4),{n,t,{}}});
+        if(t[0].text=="python"&&t.size()==1)pythonIndent=int(columns);
     }
     size_t pos=0; function<vector<Node>(int)> block=[&](int depth){vector<Node> out;while(pos<lines.size()&&lines[pos].indent>=depth){if(lines[pos].indent!=depth)fail(lines[pos].node.line,"Indent only one level inside the previous command.");Node node=lines[pos++].node;if(pos<lines.size()&&lines[pos].indent>depth)node.children=block(depth+1);out.push_back(std::move(node));}return out;};
     return block(0);
@@ -241,6 +254,7 @@ struct Renderer {
         return "<main id=\"app\""+style(app.pages.at(route)->children,e)+" hx-headers=\"{&quot;X-Tappy-CSRF&quot;:&quot;"+session.csrf+"&quot;}\" hx-history=\"false\"><title>"+esc(app.pages.at(route)->t[1].text)+"</title>"+(error.empty()?"":"<p role=\"alert\" class=\"tappy-error\">"+esc(error)+"</p>")+body+"</main>";
     }
 };
+#include "python.hpp"
 struct Executor {
     Engine& app;Env locals;set<string> inputNames;string redirect;bool stopped=false;size_t budget=10000;
     Executor(Engine& a,Env l):app(a),locals(std::move(l)){}
@@ -251,6 +265,7 @@ struct Executor {
             Env child=e;
             if(k=="else"){if(!previous||t.size()!=1)fail(n.line,"Put else immediately after if.");if(!matched||validate)run(n.children,validate);previous=false;continue;}previous=false;
             if(k=="if"){matched=app.condition(n,e);previous=true;if(matched||validate)run(n.children,validate);continue;}
+            if(k=="python"){auto updated=tappy_python::run(n,e,app.state,validate);if(!validate)for(auto& [name,value]:updated)app.state[name]=std::move(value);continue;}
             if(!n.children.empty())fail(n.line,"Only if/else can contain action blocks.");
             if(k=="set"){if(t.size()<4||t[2].text!="to"||!app.state.count(t[1].text))fail(n.line,"Write set declaredVariable to value.");Value value=app.expr(t,3,t.size(),e,n.line);if(value.index()!=app.state.at(t[1].text).index())fail(n.line,"Keep the same type when setting a variable.");if(!validate)app.state[t[1].text]=value;}
             else if(k=="add"){if(t.size()<4||t[t.size()-2].text!="to")fail(n.line,"Write add value to list.");string name=t.back().text;if(!app.state.count(name)||!holds_alternative<List>(app.state.at(name)))fail(n.line,"Add items to a declared list.");Value v=app.expr(t,1,t.size()-2,e,n.line);if(!holds_alternative<string>(v))fail(n.line,"MVP lists contain text items.");if(!validate){auto& list=get<List>(app.state[name]);if(list.size()>=10000)fail(n.line,"A list can contain at most 10,000 items.");list.push_back(get<string>(v));}}
@@ -387,7 +402,7 @@ int tappyMain(int argc,char** argv){try{
         auto helper=tappy_update::helper();if(!fs::exists(helper))throw Error("The update helper is missing. Install the latest package from GitHub.");
         return tappy_update::process({helper,"--force",tappy_update::version});
     }
-    if(argc<2||string(argv[1])=="--help"){cout<<"Tappyweb 0.3 — a small, readable web language\n\n  tappy file.tappy [--port 3000]\n  tappy check file.tappy\n  tappy update\n  tappy serve file.tappy [--port 3000]\n  tappy build file.tappy [--out dist]\n\nbuild exports static pages; use serve for forms and state changes.\n";return 0;}string command=argv[1];if(command=="--version"){cout<<"tappy 0.3.1\n";return 0;}bool direct=utf8Path(command).extension()==".tappy";int sourceIndex=direct?1:2;if(direct)command="serve";if(command!="check"&&command!="serve"&&command!="build")throw Error("Unknown command. Use tappy file.tappy or run tappy --help.");if(argc<=sourceIndex)throw Error("Give a .tappy source file.");fs::path source=fs::absolute(utf8Path(argv[sourceIndex]));filename=pathText(source);int port=3000;fs::path out="dist";
+    if(argc<2||string(argv[1])=="--help"){cout<<"Tappyweb 0.4 — a small, readable web language\n\n  tappy file.tappy [--port 3000]\n  tappy check file.tappy\n  tappy update\n  tappy serve file.tappy [--port 3000]\n  tappy build file.tappy [--out dist]\n\nbuild exports static pages; use serve for forms and state changes.\n";return 0;}string command=argv[1];if(command=="--version"){cout<<"tappy 0.4.0\n";return 0;}bool direct=utf8Path(command).extension()==".tappy";int sourceIndex=direct?1:2;if(direct)command="serve";if(command!="check"&&command!="serve"&&command!="build")throw Error("Unknown command. Use tappy file.tappy or run tappy --help.");if(argc<=sourceIndex)throw Error("Give a .tappy source file.");fs::path source=fs::absolute(utf8Path(argv[sourceIndex]));filename=pathText(source);int port=3000;fs::path out="dist";
     for(int i=sourceIndex+1;i<argc;++i){string opt=argv[i];if(i+1>=argc)throw Error("Missing value after "+opt);string value=argv[++i];if(opt=="--port"&&command=="serve"){if(value.empty()||!all_of(value.begin(),value.end(),[](unsigned char c){return isdigit(c);})||value.size()>5)throw Error("Port must be 1–65535.");port=stoi(value);if(port<1||port>65535)throw Error("Port must be 1–65535.");}else if(opt=="--out"&&command=="build")out=utf8Path(value);else throw Error("Unknown option: "+opt);}
     Engine app(parse(readFile(source)));validate(app);
     if(command=="check"){cout<<"OK · "<<app.pages.size()<<" pages, "<<app.components.size()<<" components, "<<app.state.size()<<" state variables\n";return 0;}

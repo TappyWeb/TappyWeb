@@ -1,6 +1,6 @@
 # Tappyweb for Windows
 
-The Windows x64 package contains the native C++ `tappy.exe`, examples, documentation and dependency licenses. It targets Windows 10/11 x64 and requires no separately installed compiler, Python, .NET or Node.js to run.
+The Windows x64 package contains the native C++ `tappy.exe`, examples, documentation and dependency licenses. It targets Windows 10/11 x64 and requires no separately installed compiler, .NET or Node.js to run. Python 3.10+ is required only for Python-event apps.
 
 ## NSIS installer
 
@@ -36,7 +36,7 @@ Installation needs no administrator account. If your organization's script polic
 
 ## Build on Windows
 
-Install Visual Studio 2022 Build Tools with Desktop development with C++, CMake, Python 3 and NSIS 3. From the repository root:
+Install Visual Studio 2022 Build Tools with Desktop development with C++, CMake and NSIS 3 (Python 3.10+ for tests and Python-event apps). From the repository root:
 
 ```powershell
 .\tools\package_windows.ps1
@@ -52,13 +52,15 @@ The ZIP and NSIS Setup.exe are written under `releases/`. The GitHub Actions Win
 Use the official [LLVM-MinGW toolchain](https://github.com/mstorsjo/llvm-mingw/releases), including its macOS host package:
 
 ```sh
-python3 tools/embed.py
+make bin/tappy-embed
+./bin/tappy-embed .
 /path/to/llvm-mingw/bin/x86_64-w64-mingw32-clang++ \
   -std=c++20 -O2 -static -municode -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 \
   -Ivendor src/main.cpp -lws2_32 -lwinhttp -o /tmp/tappy.exe
 /path/to/llvm-mingw/bin/x86_64-w64-mingw32-clang++ \
   -std=c++20 -O2 -static -Ivendor tools/updater.cpp -lwinhttp -lbcrypt -o /tmp/tappy-update.exe
-python3 tools/package_windows.py --binary /tmp/tappy.exe --updater /tmp/tappy-update.exe \
+make bin/tappy-package
+./bin/tappy-package windows --binary /tmp/tappy.exe --updater /tmp/tappy-update.exe \
   --toolchain-license /path/to/llvm-mingw/LICENSE.TXT
 ```
 

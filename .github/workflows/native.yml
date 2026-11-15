@@ -1,0 +1,33 @@
+name: Native C++
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+env:
+  TAPPY_NO_UPDATE: '1'
+jobs:
+  build-and-test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build without Python tooling
+        run: cmake -S . -B build/native && cmake --build build/native --parallel 2
+      - name: Test language and Python events
+        env:
+          TAPPY_TEST_BINARY: ${{ github.workspace }}/build/native/tappy
+        run: python tests/test_cli.py
+      - name: Test themes and updater
+        run: ./build/native/tappy-theme-tests && ./build/native/tappy-update --self-test
+      - name: Build Mac installers
+        if: runner.os == 'macOS'
+        run: ./build/native/tappy-package macos
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS'
+        with:
+          name: language-macos-universal
+          path: releases/*0.4.0*

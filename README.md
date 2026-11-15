@@ -1,171 +1,155 @@
 <p align="center">
   <img src="assets/logo.png" width="112" alt="Tappyweb logo">
 </p>
-
 <h1 align="center">Tappyweb</h1>
-<p align="center"><strong>A whole web app. One readable file.</strong></p>
-<p align="center">Pages, forms, reusable components and server-side state — powered by C++ and HTMX.</p>
+<p align="center">Build a web app in a file you can read.</p>
+<p align="center">
+  <a href="https://github.com/TappyWeb/TappyWeb/releases/latest"><img src="https://img.shields.io/github/v/release/TappyWeb/TappyWeb?label=release" alt="Latest release"></a>
+  <a href="https://github.com/TappyWeb/TappyWeb/actions/workflows/native.yml"><img src="https://img.shields.io/github/actions/workflow/status/TappyWeb/TappyWeb/native.yml?branch=main&label=macOS%20%2F%20Linux" alt="macOS and Linux tests"></a>
+  <a href="https://github.com/TappyWeb/TappyWeb/actions/workflows/windows.yml"><img src="https://img.shields.io/github/actions/workflow/status/TappyWeb/TappyWeb/windows.yml?branch=main&label=Windows" alt="Windows build and tests"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license"></a>
+  <a href="https://github.com/TappyWeb/TappyWeb/stargazers"><img src="https://img.shields.io/github/stars/TappyWeb/TappyWeb?style=flat&label=stars" alt="GitHub stars"></a>
+</p>
+<p align="center">
+  <a href="https://github.com/TappyWeb/TappyWeb/releases/latest">Download</a> ·
+  <a href="docs/language.md">Language guide</a> ·
+  <a href="docs/python.md">Python</a> ·
+  <a href="docs/themes.md">Themes</a> ·
+  <a href="examples">Examples</a> ·
+  <a href="https://github.com/TappyWeb/TappyWeb/issues">Report a bug</a>
+</p>
+
+Tappyweb puts pages, forms, components and state in a `.tappy` file. The **C++20 runtime** renders the HTML and handles actions on the server; HTMX updates the page. You can add Python to an event when you need a Python library or calculation.
 
 ```tappy
-save tasks as []
+set completed to 12
 
-page "My tasks" /
-    heading "Make something happen."
+set home to new page with name "Home":
+    suffix: /
+    heading "One step at a time."
+    text "{completed} tasks completed"
+    button "Finish a task":
+        on click:
+            set completed to completed + 1
+```
 
+Save it as `home.tappy` and run:
+
+```sh
+tappy home.tappy
+```
+
+Open **http://127.0.0.1:3000**. Save changes to update the running app. Matching state stays in memory; an invalid edit leaves the last working app running. Use `save` instead of `set` for state that should survive a restart.
+
+## Download
+
+Get the [latest release](https://github.com/TappyWeb/TappyWeb/releases/latest):
+
+| Platform | Install | Also available |
+| --- | --- | --- |
+| macOS 13+, Apple Silicon and Intel | Universal `.pkg` | Portable `.zip` |
+| Windows 10/11, x64 | NSIS `Setup.exe` | Portable `.zip` |
+| Linux | Build from source below | — |
+
+Installers add the `tappy` command and a `.tappy` file launcher. Existing OS default-app choices may take precedence. Releases are currently unsigned; Mac packages are not notarized.
+
+No compiler or Python is needed for ordinary Tappy apps. **Apps with Python events need Python 3.10+ installed separately.** Python is not bundled with the runtime.
+
+```sh
+tappy --version
+tappy update
+```
+
+The installed language checks for GitHub updates in the background at most daily. Updates are SHA256-verified and staged for the next command. Running servers keep their current version until restarted. Set `TAPPY_NO_UPDATE=1` to disable update checks and cached-runtime forwarding.
+
+## Python when you need it
+
+The integration is written in **C++**, with the small Python execution bridge embedded in the binary. There is no Rust runtime or separate Python web server.
+
+```tappy
+set total to 0
+
+set home to new page with name "Calculator":
+    suffix: /
+    heading "Total: {total}"
     form:
-        input "Your next task" as draft required
-        button "Add task"
+        input "Price" as price required type number
+        button "Add tax"
         on submit:
-            add draft to tasks
-            clear draft
-
-    for each task in tasks:
-        row:
-            text task
-            button "Done":
-                on click:
-                    remove task from tasks
+            python:
+                from decimal import Decimal
+                total = float(Decimal(price) * Decimal("1.20"))
 ```
 
-**That is a working task app.** Tappyweb renders the HTML, handles submissions on the server, updates the page through HTMX, and saves the tasks between restarts.
+State and form inputs are available by name. Changes to declared state return to Tappy after the block succeeds. You can also run a file with `python "./helper.py"`, import your own modules, and use packages from the app's `.venv`.
 
-## Make it look like yours
+`tappy check` catches Python syntax errors without executing the code. Event errors roll back Tappy state. Each block has a 10-second deadline and a 1 MiB result limit. Python runs with your server user's permissions; file writes and network requests cannot be rolled back. Run trusted app code only.
 
-Use a CSS file from your project or a link to a theme someone has shared:
+See the [Python guide](docs/python.md) for interpreter selection, virtual environments, scripts and examples.
 
-```tappy
-set theme to "./themes/midnight.css"
-```
+## Pages, components and themes
 
-Studio has **File → New Theme…** for a starting CSS file. Edit it, save it, and the running preview updates. Remote themes are downloaded once at startup and cached, so normal page visits do not keep hitting the theme host. You can share your CSS through any HTTPS host that serves the file directly.
+- **Named pages:** `set home to new page with name "Home":`, then `suffix: home` creates `/home`. Use `link "Home" home` or `open home` in an action.
+- **Components:** define a `component` once, then `use` it on your pages. Parameters let each copy have its own content.
+- **Forms and state:** validate inputs, change state, and save lists or values between restarts.
+- **CSS themes:** `set theme to "./theme.css"` or use an HTTPS link. Local CSS reloads on save; remote CSS is downloaded at startup and cached.
+- **HTMX:** included in the binary, with native attributes available for fragments and custom interactions.
+- **Tabs or spaces:** use tabs or four spaces for Tappy indentation. Python blocks keep Python's own indentation inside the block.
 
-See the [theme guide](docs/themes.md) for the CSS variables, remote links and how to share a theme.
+[Read the language guide](docs/language.md) · [Browse examples](examples) · [Make a theme](docs/themes.md)
 
-This description has been written with AI.
+## Build from source
 
-## From file to localhost
+Use a C++20 compiler and Make, or CMake 3.20+. **Building and packaging the language do not require Python.** The asset generator and release packager are C++ tools. Python is used for integration tests and for apps that contain Python events.
 
 ```sh
 git clone https://github.com/TappyWeb/TappyWeb.git
 cd TappyWeb
 make
-./bin/tappy examples/tasks.tappy
+./bin/tappy examples/dashboard.tappy
 ```
 
-Open **http://127.0.0.1:3000**. Edit the file and save. The running app reloads automatically, keeping matching state values. Invalid edits leave the last working version running and show a filename/line diagnostic.
-
-Building requires a **C++20 compiler, Make and Python 3**. On macOS, install Apple's Command Line Tools with `xcode-select --install`. Python is used for build tooling and tests; the compiled app runs as a single executable. macOS is tested; Linux can be built with a suitable toolchain (`make CXX=g++`), and Windows has a native CMake build.
-
-## Small syntax. Real interactions.
-
-- **Pages and navigation.** Declare routes and link them together.
-- **Forms and actions.** Read named inputs, validate submissions and update server state.
-- **Reusable components.** Pass values into components and compose a UI.
-- **Memory or saved state.** Use `set` for a running app and `save` for values that survive a restart.
-- **HTMX included.** Forms, buttons and internal navigation generate HTMX attributes. Use native core attributes for polling and fragments.
-- **Live reload.** Save a valid change to update the app without restarting its server.
-- **Tabs welcome.** Indent with a tab or four spaces per level.
-- **One native runtime.** C++20, embedded HTMX and embedded CSS. Build and run offline with the vendored dependencies.
-
-```tappy
-set completed to 12
-set goal to 21
-
-component Metric(label, value):
-    card:
-        subheading label
-        heading value
-
-page "Overview" /
-    grid:
-        use Metric("Completed", completed)
-        use Metric("Goal", goal)
-
-    button "Complete one":
-        on click:
-            set completed to completed + 1
-```
-
-Arithmetic supports normal operator precedence, parentheses and unary signs. Text supports `{variable}` interpolation. Inline comments use `#` outside quoted text.
-
-## Three commands to keep close
+On Linux, use `make CXX=g++`. On macOS, install Apple's Command Line Tools if needed. For Windows, see the [Windows build guide](docs/windows.md).
 
 ```sh
-./bin/tappy check app.tappy                  # Check source and show diagnostics
-./bin/tappy app.tappy --port 3001            # Run on localhost
-./bin/tappy build app.tappy --out dist       # Export a static site
+cmake -S . -B build/native
+cmake --build build/native --config Release
 ```
 
-`serve app.tappy` also works. Static export is for pages without server actions; interactive apps run through the native server. Serve exported files over HTTP from the origin root.
-
-## Explore the examples
-
-| Example | What you can build |
-| --- | --- |
-| [Task app](examples/tasks.tappy) | A saved task list with forms and deletion |
-| [Dashboard](examples/dashboard.tappy) | Metrics, conditions and server-side updates |
-| [Components](examples/metrics.tappy) | Parameterized components with tab indentation |
-| [Feedback form](examples/feedback.tappy) | Required fields, email validation and saved feedback |
-| [Landing page](examples/landing.tappy) | A static site you can export |
-| [Live fragments](examples/fragments.tappy) | HTMX polling and partial HTML responses |
-
-[Read the language reference](docs/language.md) · [Understand the runtime](docs/architecture.md)
-
-## Package it for macOS
+### Check and export
 
 ```sh
-make pkg
+tappy check home.tappy
+tappy build home.tappy --out dist
 ```
 
-This builds `releases/Tappyweb-0.3.0-macOS-universal.pkg` for Apple Silicon and Intel, targeting macOS 13+. It installs `tappy` in `/usr/local/bin` and examples in `/usr/local/share/tappyweb`.
+`build` exports static pages. Pages with event handlers need `serve` instead. Normal requests and actions stay on the local server; live reload uses one persistent change connection rather than repeated browser polling.
 
-After installation:
+### Test and package
 
 ```sh
-tappy app.tappy
+make test             # Python 3 for HTTP integration tests
+make pkg              # macOS: universal PKG and update ZIP
 ```
 
-The recipient runs the compiled executable without a compiler, Python or a separate HTMX installation. Packages built by this repository are unsigned and not notarized; public distribution through Apple's normal trust flow requires Developer ID signing and notarization. Intel builds are compiled here; execution has been tested on Apple Silicon.
+For Windows, `tools/package_windows.ps1` builds with CMake and runs the native packager. NSIS 3 creates the installer. The packager can also package cross-compiled Windows binaries; see [docs/windows.md](docs/windows.md).
 
-## Current scope
+## Contributing
 
-Tappyweb **0.3 is an early language MVP**, well suited to local prototypes and small interactive tools. Syntax may evolve. Legacy `state`, `remember` and `nav` declarations remain supported.
+Bug reports, small fixes, examples and themes are welcome. Include a small `.tappy` file that reproduces a problem. See [CONTRIBUTING.md](CONTRIBUTING.md) for checks and pull requests.
 
-State is shared across browser sessions. Saved values live beside the source in `.tappy-data/`; they are local app storage, not user accounts or a concurrent database. The server binds to `127.0.0.1`. Keep one server process per source/data file.
+If you find Tappyweb useful, [give the repo a star](https://github.com/TappyWeb/TappyWeb/stargazers). It helps other people find it.
 
-Lists currently contain strings. Authentication, objects, imports, custom functions, route parameters, database connectors and outbound API clients are future work. The bundled HTMX core is 2.0.8; JavaScript evaluation, inline scripts and extensions are disabled. The HTTP server uses vendored cpp-httplib 0.28.0. Third-party licenses are included with their sources.
+## License and credits
 
-## Develop
+Tappyweb is available under the [MIT license](LICENSE). Bundled third-party code keeps its own license:
 
-```sh
-make test
-```
+| Dependency | License | Used for |
+| --- | --- | --- |
+| [cpp-httplib](https://github.com/yhirose/cpp-httplib) | [MIT](vendor/httplib.LICENSE) | Local HTTP server |
+| [HTMX](https://github.com/bigskysoftware/htmx) | [0BSD](assets/htmx.LICENSE) | Browser updates |
+| [nlohmann/json](https://github.com/nlohmann/json) | [MIT](vendor/json.LICENSE) | Python state exchange and release metadata |
 
-The integration suite exercises the real executable and HTTP server: forms, saved state, escaping, CSRF checks, stale actions, atomic rollback, live reload, component parameters, arithmetic and indentation.
+Python support was brought over from the Tappyweb language prototype while keeping the public runtime in C++. The original dependency notices are included in release packages.
 
-Tappyweb Studio is developed separately. This repository contains the language, runtime, examples and CLI packaging.
-
-
-## Windows
-
-Use the native Windows x64 package to run `tappy file.tappy` from Windows Terminal. The NSIS Setup.exe installs the command and its user PATH entry. A portable ZIP is also available. See the [Windows guide](docs/windows.md) for installation, native builds and cross-compilation. Windows builds are cross-compiled on macOS; native CI and Windows UI testing must run separately.
-
-
-The macOS PKG installs `/usr/local/bin/tappy` and `/etc/paths.d/tappyweb`. After installation, open a new Terminal window and run `tappy file.tappy`.
-
-## Named pages, fewer requests
-
-```tappy
-set home to new page with name "Home":
-    suffix: home
-    heading "Welcome"
-    link "More details" details
-
-set details to new page with name "Details":
-    suffix: details
-    link "Back home" home
-```
-
-Page names are reusable route references: `home` resolves to `/home` on the current site. The Library in Mac Studio uses this syntax throughout. Legacy pages remain valid.
-
-Live reload now uses server-sent notifications instead of polling the server twice per second. Installed runtimes can stage SHA256-verified updates from public GitHub releases, at most daily, and apply them on the next command. `tappy update` checks immediately; `TAPPY_NO_UPDATE=1` disables this behavior. Double-click `.tappy` files after installing to launch them in your terminal. See [the language reference](docs/language.md) for details.
+This description has been written with AI.

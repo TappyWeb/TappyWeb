@@ -4,9 +4,9 @@
 
 `source → indentation parser → AST with source lines → semantic validation → HTML renderer → HTMX browser → C++ action executor → HTML fragment`
 
-The native CLI parses and validates once at startup. AST nodes retain source line numbers for errors. This MVP interprets action ASTs in C++; it does not translate a Tappyweb program into native machine code. The runtime itself is compiled with C++20 and `-O2`. No JVM, Node server or Python process is required at runtime.
+The native CLI parses and validates once at startup. AST nodes retain source line numbers for errors. This MVP interprets action ASTs in C++; it does not translate a Tappyweb program into native machine code. The runtime itself is compiled with C++20 and `-O2`. No JVM or Node server is required. Python is optional: apps with Python events start a Python 3 subprocess for each block. Ordinary Tappy apps need no Python interpreter.
 
-`src/main.cpp` contains the lexer/parser, typed values and expression evaluator, renderer, semantic checker, action executor, persistence layer and CLI/HTTP server. `assets/default.css` supplies default presentation. `tools/embed.py` generates `src/assets.hpp` from that stylesheet and the pinned HTMX distribution. Make rebuilds the binary when source, dependencies or assets change.
+`src/main.cpp` contains the lexer/parser, typed values and expression evaluator, renderer, semantic checker, action executor, persistence layer and CLI/HTTP server. `assets/default.css` supplies default presentation. `tools/embed.cpp` generates `src/assets.hpp` from that stylesheet and the pinned HTMX distribution. Make rebuilds the binary when source, dependencies or assets change.
 
 ## Requests
 
@@ -50,3 +50,9 @@ A real-browser interaction check is separate from HTTP integration tests. Native
 One server watcher checks source metadata every 250 ms, including editor atomic-save renames. It reads and validates only changed files. Browsers hold a bounded Server-Sent Events connection rather than sending periodic reload requests. Idle connections receive a keep-alive every 25 seconds; successful edits trigger one reload event.
 
 A changed source is parsed and validated as a candidate engine. Same-name/same-type live values are copied and routes validated before swapping engines under the state mutex. Errors keep the working app available. A successful swap clears old action tokens and notifies connected browsers. Static exports do not include live reload.
+
+## Python bridge and native tooling
+
+`src/python.hpp` implements interpreter selection, argument-safe process launch, a 10-second deadline, private temporary files, JSON state exchange and cleanup in C++. Its short Python execution wrapper is embedded in the binary; no companion bridge script is installed. Validation compiles blocks without executing them. Runtime errors are handled by the existing C++ event transaction, which restores state on failure. External effects from user Python code cannot be restored.
+
+`tools/embed.cpp` generates embedded browser assets and `tools/package.cpp` creates Mac/Windows distributions using native platform tools. There are no Python build or packaging scripts in the language source. Python test files exercise the actual compiled binary and HTTP server.

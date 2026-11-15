@@ -1,11 +1,19 @@
 cmake_minimum_required(VERSION 3.20)
-project(Tappyweb VERSION 0.3.1 LANGUAGES CXX)
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
+project(Tappyweb VERSION 0.4.0 LANGUAGES CXX)
 find_package(Threads REQUIRED)
+add_executable(tappy-embed tools/embed.cpp)
+target_compile_features(tappy-embed PRIVATE cxx_std_17)
+add_executable(tappy-package tools/package.cpp)
+target_compile_features(tappy-package PRIVATE cxx_std_20)
+if(MSVC)
+    target_compile_options(tappy-package PRIVATE /utf-8)
+elseif(MINGW)
+    target_link_options(tappy-package PRIVATE -municode)
+endif()
 add_custom_command(OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/src/assets.hpp"
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed.py"
+    COMMAND tappy-embed "${CMAKE_CURRENT_SOURCE_DIR}"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    DEPENDS tools/embed.py assets/htmx.min.js assets/default.css)
+    DEPENDS tappy-embed tools/embed.cpp assets/htmx.min.js assets/default.css)
 add_executable(tappy src/main.cpp src/assets.hpp)
 target_compile_features(tappy PRIVATE cxx_std_20)
 target_include_directories(tappy PRIVATE vendor)
