@@ -19,7 +19,7 @@ fs::path command(const string& name){auto given=tappy_update::utf8(name);if(give
     throw runtime_error("Missing tool: "+name);
 }
 void run(vector<string> args){vector<fs::path> paths{command(args.at(0))};for(size_t i=1;i<args.size();++i)paths.push_back(tappy_update::utf8(args[i]));if(tappy_update::process(paths)!=0)throw runtime_error("Command failed: "+args[0]);}
-string text(const fs::path& path){auto value=path.u8string();return string(reinterpret_cast<const char*>(value.data()),value.size());}
+string text(const fs::path& path){auto native=path;native.make_preferred();auto value=native.u8string();return string(reinterpret_cast<const char*>(value.data()),value.size());}
 void executable(const fs::path& path){fs::permissions(path,fs::perms::owner_all|fs::perms::group_read|fs::perms::group_exec|fs::perms::others_read|fs::perms::others_exec);}
 string psquote(string value){string out="'";for(char c:value){out+=c;if(c=='\'')out+=c;}return out+"'";}
 void archive(const fs::path& folder,const fs::path& output){fs::remove(output);
